@@ -1,0 +1,219 @@
+//package main1
+//
+//import (
+//	"bytes"
+//	"encoding/xml"
+//	"fmt"
+//	"io"
+//	"net"
+//	"net/http"
+//	"net/url"
+//	"os"
+//	"sort"
+//	"strconv"
+//	"strings"
+//	"time"
+//)
+//
+//type persons struct {
+//	XMLName xml.Name `xml:"root"`
+//	Usr     []Usr    `xml:"row"`
+//}
+//
+//type Usr struct {
+//	ID            string `xml:"id"`
+//	Guid          string `xml:"guid"`
+//	IsActive      string `xml:"isActive"`
+//	Balance       string `xml:"balance"`
+//	Picture       string `xml:"picture"`
+//	Age           string `xml:"age"`
+//	EyeColor      string `xml:"eyeColor"`
+//	FirstName     string `xml:"first_name"`
+//	LastName      string `xml:"last_name"`
+//	Gender        string `xml:"gender"`
+//	Company       string `xml:"company"`
+//	Email         string `xml:"email"`
+//	Phone         string `xml:"phone"`
+//	Address       string `xml:"address"`
+//	About         string `xml:"about"`
+//	Registered    string `xml:"registered"`
+//	FavoriteFruit string `xml:"favoriteFruit"`
+//	name          string
+//}
+//
+//func usrSort(usr []Usr, field string, order_by int) []Usr {
+//	if order_by != OrderByAsIs {
+//		sortFunc := func(i, j int) bool {
+//			var namei, namej bytes.Buffer
+//			if field == "Name" || field == "" {
+//				namei.WriteString(usr[i].FirstName)
+//				namei.WriteString(usr[i].LastName)
+//				namej.WriteString(usr[j].FirstName)
+//				namej.WriteString(usr[j].LastName)
+//				if order_by == OrderByAsc {
+//					return namei.String() < namej.String()
+//				} else if order_by == OrderByDesc {
+//					return namei.String() > namej.String()
+//				}
+//			} else if field == "Age" {
+//				if order_by == OrderByAsc {
+//					return usr[i].Age < usr[j].Age
+//				} else if order_by == OrderByDesc {
+//					return usr[i].Age > usr[j].Age
+//				}
+//			} else if field == "Id" {
+//				if order_by == OrderByAsc {
+//					return usr[i].ID < usr[j].ID
+//				} else if order_by == OrderByDesc {
+//					return usr[i].ID > usr[j].ID
+//				}
+//			}
+//			return false
+//		}
+//		sort.SliceStable(usr, sortFunc)
+//	}
+//	return usr
+//}
+//
+//// код писать тут
+//// query - что искать. Ищем по полям записи Name и About просто подстроку, без регулярок. Name - это first_name + last_name из xml (вам надо руками пройтись в цикле по записям и сделать такой, автоматом нельзя). Если поле пустое - то возвращаем все записи (поиск пустой подстроки всегда возвращает true), т.е. делаем только логику сортировки
+//// order_field - по какому полю сортировать. Работает по полям Id, Age, Name, если пустой - то сортируем по Name, если что-то другое - SearchServer ругается ошибкой.
+//// order_by - направление сортировки (как есть, по убыванию, по возрастанию), в client.go есть соответствующие константы
+//// limit - сколько записей вернуть
+//// offset - начиня с какой записи вернуть (сколько пропустить с начала) - нужно для огранизации постраничной навигации
+//func clientSort(w http.ResponseWriter, r *http.Request) {
+//	var (
+//		pers                                               persons
+//		query, orderField, limitStr, offsetStr, orderByStr string
+//		limit, offset, orderBy                             int
+//		buffer                                             bytes.Buffer
+//		usrRes                                             []Usr
+//	)
+//	query = r.URL.Query().Get("query")
+//	orderField = r.URL.Query().Get("order_field")
+//	orderByStr = r.URL.Query().Get("order_by")
+//	limitStr = r.URL.Query().Get("limit")
+//	offsetStr = r.URL.Query().Get("offset")
+//
+//	if orderField != "" && orderField != "Id" && orderField != "Age" && orderField != "Name" {
+//		w.WriteHeader(http.StatusBadRequest)
+//		fmt.Fprintf(w, "Error: incorrect order_field='%s'", orderField)
+//		return
+//	}
+//
+//	if val, err := strconv.Atoi(orderByStr); err != nil || val != OrderByAsc && val != OrderByDesc && val != OrderByAsIs {
+//		w.WriteHeader(http.StatusBadRequest)
+//		fmt.Fprintf(w, "Error: incorrect order_by='%s'", orderByStr)
+//		return
+//	} else {
+//		orderBy = val
+//	}
+//	if val, err := strconv.Atoi(limitStr); err != nil {
+//		w.WriteHeader(http.StatusBadRequest)
+//		fmt.Fprintf(w, "Error: incorrect limit='%s'", limitStr)
+//		return
+//	} else {
+//		limit = val
+//	}
+//	if val, err := strconv.Atoi(offsetStr); err != nil {
+//		w.WriteHeader(http.StatusBadRequest)
+//		fmt.Fprintf(w, "Error: incorrect offset='%s'", offsetStr)
+//		return
+//	} else {
+//		offset = val
+//	}
+//
+//	fileData, err := os.ReadFile("dataset.xml")
+//	if err != nil {
+//		w.WriteHeader(http.StatusInternalServerError)
+//		fmt.Fprintf(w, "Error file open. (%s)", err.Error())
+//		return
+//	}
+//	if err := xml.Unmarshal(fileData, &pers); err != nil {
+//		fmt.Println(err.Error())
+//	}
+//	usrRes = make([]Usr, 0, len(pers.Usr))
+//
+//	//фильтрация
+//	if query != "" {
+//		for _, user := range pers.Usr {
+//			buffer.WriteString(user.FirstName)
+//			buffer.WriteString(user.LastName)
+//			if strings.Contains(buffer.String(), query) || strings.Contains(user.About, query) {
+//				usrRes = append(usrRes, user)
+//			}
+//		}
+//	}
+//
+//	usrResSort := usrSort(usrRes, orderField, orderBy)
+//
+//	//ограничиваем краевые случаи длинны
+//	if limit > len(usrResSort) {
+//		limit = len(usrResSort)
+//	}
+//	if offset > len(usrResSort) {
+//		offset = len(usrResSort)
+//	}
+//	usrResSort = usrResSort[offset:limit]
+//
+//	res, _ := xml.MarshalIndent(usrResSort, "", "	")
+//
+//	w.WriteHeader(http.StatusOK)
+//	w.Write(res)
+//}
+//
+//func server() {
+//	http.HandleFunc("/", clientSort)
+//	http.ListenAndServe(":8080", nil)
+//}
+//func main() {
+//	go server()
+//	time.Sleep(time.Second)
+//	searcherParams := url.Values{}
+//	searcherParams.Add("limit", "2")
+//	searcherParams.Add("offset", "3")
+//	searcherParams.Add("query", "est a")
+//	searcherParams.Add("order_field", "Name")
+//	searcherParams.Add("order_by", "-1")
+//	fmt.Println(searcherParams.Encode())
+//
+//	searcherReq, err := http.NewRequest("GET", "http://127.0.0.1:8080/?"+searcherParams.Encode(), nil)
+//	resp, err := client.Do(searcherReq)
+//	if err != nil {
+//		if err, ok := err.(net.Error); ok && err.Timeout() {
+//			fmt.Errorf("timeout for %s", searcherParams.Encode())
+//		}
+//		fmt.Errorf("unknown error %s", err)
+//	}
+//	//
+//	//
+//
+//	defer resp.Body.Close()
+//	body, err := io.ReadAll(resp.Body)
+//	fmt.Println("body", string(body))
+//	time.Sleep(time.Hour)
+//	//
+//	//switch resp.StatusCode {
+//	//case http.StatusUnauthorized:
+//	//	return nil, fmt.Errorf("Bad AccessToken")
+//	//case http.StatusInternalServerError:
+//	//	return nil, fmt.Errorf("SearchServer fatal error")
+//	//case http.StatusBadRequest:
+//	//	errResp := SearchErrorResponse{}
+//	//	err = json.Unmarshal(body, &errResp)
+//	//	if err != nil {
+//	//		return nil, fmt.Errorf("cant unpack error json: %s", err)
+//	//	}
+//	//	if errResp.Error == "ErrorBadOrderField" {
+//	//		return nil, fmt.Errorf("OrderFeld %s invalid", req.OrderField)
+//	//	}
+//	//	return nil, fmt.Errorf("unknown bad request error: %s", errResp.Error)
+//	//}
+//	//
+//	//data := []User{}
+//	//err = json.Unmarshal(body, &data)
+//	//if err != nil {
+//	//	return nil, fmt.Errorf("cant unpack result json: %s", err)
+//	//}
+//
+//}

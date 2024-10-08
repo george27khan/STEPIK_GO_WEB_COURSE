@@ -1,0 +1,5 @@
+Запускт тестов с покрытием
+go test -coverprofile=cover_test
+
+Формирование веб файла отчета
+go tool cover -html=cover_test -o cover_test.html
