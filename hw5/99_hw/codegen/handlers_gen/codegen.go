@@ -31,6 +31,16 @@ type FuncInfo struct {
 	FuncName string
 }
 
+type structInfo struct {
+	Name       string
+	Attributes []structAttrInfo
+}
+type structAttrInfo struct {
+	Name string
+	Type string
+	Tag  string
+}
+
 var (
 	// шаблон сигнатуры функции ServeHTTP
 	ServeHTTPtmpl = template.Must(template.New("ServeHTTPtmpl").Parse(`
@@ -54,14 +64,23 @@ var (
 		`))
 
 	//шаблон тела функции ServeHTTP
-	wrapFncCheckTmpl = template.Must(template.New("wrapFncTmpl").Parse(`
-		func (h {{.RecieverType}}) wrapper{{.FuncName}}() {
-		// заполнение структуры params
-		//		// валидирование параметров
-			res, err := h.{{.FuncName}}(ctx, params)
-		//		// прочие обработки
+	createStructTmpl = template.Must(template.New("createStructTmpl").Parse(`
+		var params {{.Name}}
+		{{range .Attributes}}
+			if {{.Type}} == "int" {
+				params.{{.Name}}, _ = strconv.Atoi(r.Header.Get(strings.ToLower({{.Name}})))
+			} else if {{.Type}} == "string" {
+				params.{{.Name}} = r.Header.Get(strings.ToLower({{.Name}}))
+			}
+		{{end}}
+
 		`))
 )
+
+//func ServeHTTP(w http.ResponseWriter, r *http.Request) {
+//	r.Header.Get()
+//	strconv.Atoi()
+//}
 
 //	func (h *SomeStructName ) wrapperDoSomeJob() {
 //		// заполнение структуры params
@@ -70,6 +89,9 @@ var (
 //		// прочие обработки
 //	}
 func main() {
+
+	fmt.Println(strings.Split("enum=warrior|sorcerer|rouge,default=warrior", ","))
+	return
 	var (
 		opts     funcOpts
 		APIparts map[string][]FuncInfo
@@ -84,7 +106,7 @@ func main() {
 	}
 	fmt.Fprintln(os.Stdout, `package `+node.Name.Name) //название пакета
 	fmt.Fprintln(os.Stdout)                            // empty line
-
+	structParts := make(map[string][]structAttrInfo)
 	for _, part := range node.Decls {
 		g, ok := part.(*ast.GenDecl) // Проверяем, является ли узел для типов
 		if !ok {
@@ -94,11 +116,32 @@ func main() {
 		for _, spec := range g.Specs {
 			currType, ok := spec.(*ast.TypeSpec)
 			if !ok {
-				fmt.Printf("SKIP %#T is not ast.TypeSpec\n", spec)
+				//fmt.Printf("SKIP %#T is not ast.TypeSpec\n", spec)
 				continue
 			}
-			fmt.Println(currType.Type.(*ast.StructType).Fields.List[0].Tag)
+			typeName := currType.Name.String()
+			for _, attr := range currType.Type.(*ast.StructType).Fields.List {
+				switch expr := attr.Type.(type) {
+				case *ast.Ident:
+					//fmt.Printf("type: %T data: %+v\n", expr., expr.Name)
+					tag := ""
+					if attr.Tag != nil {
+						tag = attr.Tag.Value
+					}
+					if _, ok := structParts[typeName]; ok {
+						structParts[typeName] = append(structParts[typeName], structAttrInfo{attr.Names[0].String(), expr.Name, tag})
+					} else {
+						structParts[typeName] = []structAttrInfo{structAttrInfo{attr.Names[0].String(), expr.Name, tag}}
+					}
+				}
+			}
+			//fmt.Println(structParts)
+			//fmt.Println(len(currType.Type.(*ast.StructType).Fields.List))
+			//spec.(*ast.TypeSpec) + currType.Type.(*ast.StructType) -
 		}
+	}
+	for name, info := range structParts {
+		createStructTmpl.Execute(os.Stdout, structInfo{name, info})
 	}
 	return
 
