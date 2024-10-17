@@ -27,8 +27,10 @@ type ParamsServeHTTP struct {
 }
 
 type FuncInfo struct {
-	Path     string
-	FuncName string
+	Path      string
+	FuncName  string
+	FuncParam [][]string
+	FuncOut   [][]string
 }
 
 type structInfo struct {
@@ -67,15 +69,125 @@ var (
 	createStructTmpl = template.Must(template.New("createStructTmpl").Parse(`
 		var params {{.Name}}
 		{{range .Attributes}}
+            optsMap := tagToMap({{.Tag}})
 			if {{.Type}} == "int" {
-				params.{{.Name}}, _ = strconv.Atoi(r.Header.Get(strings.ToLower({{.Name}})))
+				// сперва проверка опции подмены имени атрибута
+				if paramName, ok := optsMap["paramname"]; ok {
+					params.{{.Name}}, _ = strconv.Atoi(r.Header.Get(paramName))
+					delete(optsMap, "paramname") 
+				} else {
+					params.{{.Name}}, _ = strconv.Atoi(r.Header.Get(strings.ToLower({{.Name}})))
+				}
+				// далее проверяем остальные параметры
+				for opt, val := range optsMap{
+					if opt == "required" && val==0 {
+						fmt.Println("Error")
+					}
+					// если есть дефолт значение и параметр принял дефолт значение
+					if opt == "default" && val==0 {
+						params.{{.Name}} = val
+					}
+					// если есть ограничения min
+					if opt == "min"{
+						if minVal, err := strconv.Atoi(val); err!=nil ||  params.{{.Name}} < minVal{
+							fmt.Println("Error")
+						}
+					}
+					// если есть ограничения max
+					if opt == "max"{
+						if maxVal, err := strconv.Atoi(val); err!=nil ||  params.{{.Name}} > maxVal {
+							fmt.Println("Error")
+						}
+					}
+				}
 			} else if {{.Type}} == "string" {
-				params.{{.Name}} = r.Header.Get(strings.ToLower({{.Name}}))
+				// сперва проверка опции подмены имени атрибута
+				if paramName, ok := optsMap["paramname"]; ok {
+					params.{{.Name}}, _ = r.Header.Get(paramName)
+					delete(optsMap, "paramname") 
+				} else {
+					params.{{.Name}}, _ = r.Header.Get(strings.ToLower({{.Name}}))
+				}
+				// далее проверяем остальные параметры
+				for opt, val := range optsMap{
+					if opt == "required" && val==0 {
+						fmt.Println("Error")
+					}
+					// если есть дефолт значение и параметр принял дефолт значение
+					if opt == "default" && val=="" {
+						params.{{.Name}} = val
+					}
+					// если есть ограничения по значениям
+					if opt == "enum"{
+						ok := false
+						for _, item := range strings.Split(val, "|") {
+							if params.{{.Name}} == item {
+								ok = true
+								break
+							}
+							if !ok {
+								fmt.Println("Error")
+							}
+						}
+					}
+					// если есть ограничения min
+					if opt == "min"{
+						if minVal, err := strconv.Atoi(val); err!=nil || len(params.{{.Name}}) < minVal{
+							fmt.Println("Error")
+						}
+					}
+				}
 			}
 		{{end}}
-
 		`))
 )
+
+func tagToMap(tag string) map[string]string {
+	tag, _ = strings.CutPrefix(tag, "apivalidator:\"")
+	tag, _ = strings.CutSuffix(tag, "\"")
+	optsMap := make(map[string]string)
+	for _, opt := range strings.Split(tag, ",") {
+		optParts := strings.Split(opt, "=")
+		optsMap[optParts[0]] = optParts[1]
+	}
+	fmt.Println(optsMap)
+	return optsMap
+}
+
+func checkParamTag(param interface{}, tag string) {
+	//required - поле не должно быть пустым (не должно иметь значение по-умолчанию)
+	//paramname - если указано - то брать из параметра с этим именем, иначе lowercase от имени
+	//enum - "одно из"
+	//default - если указано и приходит пустое значение (значение по-умолчанию) - устанавливать то что написано указано в default
+	//min - >= X для типа int, для строк len(str) >=
+	//max - <= X для типа int
+
+	var (
+		attrType, valStr string
+		valInt           int
+	)
+	switch tp := param.(type) {
+	case int:
+		attrType = "int"
+		valInt = param.(int)
+		tp = tp
+	case string:
+		attrType = "string"
+		valStr = param.(string)
+	}
+	for _, opt := range strings.Split(tag, ",") {
+		if opt == "required" {
+			if attrType == "int" && valInt == 0 || attrType == "string" && valStr == "" {
+				fmt.Println("Error")
+			}
+		}
+		if opt == "required" {
+			if attrType == "int" && valInt == 0 || attrType == "string" && valStr == "" {
+				fmt.Println("Error")
+			}
+		}
+	}
+}
 
 //func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //	r.Header.Get()
@@ -89,9 +201,10 @@ var (
 //		// прочие обработки
 //	}
 func main() {
-
-	fmt.Println(strings.Split("enum=warrior|sorcerer|rouge,default=warrior", ","))
-	return
+	//res, err := regexp.MatchString("abc|bcd|cde", "bcde")
+	//fmt.Println(res, err)
+	//
+	//return
 	var (
 		opts     funcOpts
 		APIparts map[string][]FuncInfo
@@ -140,10 +253,10 @@ func main() {
 			//spec.(*ast.TypeSpec) + currType.Type.(*ast.StructType) -
 		}
 	}
-	for name, info := range structParts {
-		createStructTmpl.Execute(os.Stdout, structInfo{name, info})
-	}
-	return
+	//fmt.Println(structParts)
+	//for name, info := range structParts {
+	//	createStructTmpl.Execute(os.Stdout, structInfo{name, info})
+	//}
 
 	APIparts = make(map[string][]FuncInfo)
 	for _, part := range node.Decls {
@@ -177,11 +290,33 @@ func main() {
 				}
 			}
 		}
-		if _, ok := APIparts[recvType]; ok {
-			APIparts[recvType] = append(APIparts[recvType], FuncInfo{opts.Url, fnc.Name.String()})
-		} else {
-			APIparts[recvType] = []FuncInfo{FuncInfo{opts.Url, fnc.Name.String()}}
+		fmt.Println(recvType)
+		funcParam := make([][]string, 0)
+		//funcOut   := make([][]string,0)
+		// Получение входящих параметров
+		fmt.Println("Входящие параметры:")
+		for _, param := range fnc.Type.Params.List {
+			switch expr := param.Type.(type) {
+			case *ast.Ident:
+				funcParam = append(funcParam, []string{param.Names[0].Name, expr.Name})
+			case *ast.SelectorExpr:
+				// Указатель на тип
+				fmt.Println("1 ", expr)
+				if ident, ok := expr.X.(*ast.Ident); ok {
+					funcParam = append(funcParam, []string{param.Names[0].Name, "*" + ident.Name})
+				}
+			}
+			//for _, name := range param.Names {
+			//	fmt.Printf("  %s %s\n", name.Name, param.Type.(*ast.SelectorExpr).Sel)
+			//}
 		}
+		//fmt.Println(funcParam)
+
+		//if _, ok := APIparts[recvType]; ok {
+		//	APIparts[recvType] = append(APIparts[recvType], FuncInfo{opts.Url, fnc.Name.String()})
+		//} else {
+		//	APIparts[recvType] = []FuncInfo{FuncInfo{opts.Url, fnc.Name.String()}}
+		//}
 		//fmt.Println(fnc.Name, fnc.Doc.Text(), fnc.Recv.List[0].Names[0], fnc.Recv.List[0].)
 		//fmt.Printf("%+v\n", fnc.Recv.List[0].Type.(*ast.StarExpr).X)
 
@@ -193,6 +328,7 @@ func main() {
 		//
 		//	}
 	}
+	//fmt.Println(APIparts)
 	for recvType, info := range APIparts {
 		ServeHTTPtmpl.Execute(os.Stdout, ParamsServeHTTP{recvType, info})
 	}
