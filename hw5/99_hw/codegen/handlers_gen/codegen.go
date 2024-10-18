@@ -27,10 +27,10 @@ type ParamsServeHTTP struct {
 }
 
 type FuncInfo struct {
-	Path      string
-	FuncName  string
-	FuncParam [][]string
-	FuncOut   [][]string
+	Path         string
+	FuncName     string
+	FuncInParam  [][]string
+	FuncOutParam [][]string
 }
 
 type structInfo struct {
@@ -201,10 +201,6 @@ func checkParamTag(param interface{}, tag string) {
 //		// прочие обработки
 //	}
 func main() {
-	//res, err := regexp.MatchString("abc|bcd|cde", "bcde")
-	//fmt.Println(res, err)
-	//
-	//return
 	var (
 		opts     funcOpts
 		APIparts map[string][]FuncInfo
@@ -219,7 +215,9 @@ func main() {
 	}
 	fmt.Fprintln(os.Stdout, `package `+node.Name.Name) //название пакета
 	fmt.Fprintln(os.Stdout)                            // empty line
+
 	structParts := make(map[string][]structAttrInfo)
+	//цикл для сбора информации по структурам
 	for _, part := range node.Decls {
 		g, ok := part.(*ast.GenDecl) // Проверяем, является ли узел для типов
 		if !ok {
@@ -259,6 +257,7 @@ func main() {
 	//}
 
 	APIparts = make(map[string][]FuncInfo)
+	//цикл для сбора информации по функциям
 	for _, part := range node.Decls {
 		fnc, ok := part.(*ast.FuncDecl) // Проверяем, является ли узел объявлением функции
 		if !ok {
@@ -267,21 +266,26 @@ func main() {
 		}
 
 		comment := fnc.Doc.Text()
+		//если у функции нет указания на генерацию апи, то пропускаем
 		if !strings.HasPrefix(comment, "apigen:api") {
 			continue
 		}
+
+		//разбираем указания генерации
 		strFuncOpts, _ := strings.CutPrefix(comment, "apigen:api ")
 		if err := json.Unmarshal([]byte(strFuncOpts), &opts); err != nil {
 			slog.Log(ctx, slog.LevelError, err.Error())
 			return
 		}
-		//получатель метода
+
+		//анализ получателя метода
 		recvType := ""
 		if fnc.Recv != nil {
 			// Получаем тип получателя
 			recvType = ""
 			switch expr := fnc.Recv.List[0].Type.(type) {
 			case *ast.Ident:
+				// простой тип
 				recvType = expr.Name
 			case *ast.StarExpr:
 				// Указатель на тип
@@ -291,32 +295,56 @@ func main() {
 			}
 		}
 		fmt.Println(recvType)
-		funcParam := make([][]string, 0)
+		//массив хранения входящих параметров [название, тип]
+		funcInParam := make([][]string, 0)
 		//funcOut   := make([][]string,0)
-		// Получение входящих параметров
+		// разбор параметров функции
 		fmt.Println("Входящие параметры:")
 		for _, param := range fnc.Type.Params.List {
 			switch expr := param.Type.(type) {
 			case *ast.Ident:
-				funcParam = append(funcParam, []string{param.Names[0].Name, expr.Name})
-			case *ast.SelectorExpr:
+				// простой тип
+				funcInParam = append(funcInParam, []string{param.Names[0].Name, expr.Name})
+			case *ast.StarExpr:
 				// Указатель на тип
-				fmt.Println("1 ", expr)
-				if ident, ok := expr.X.(*ast.Ident); ok {
-					funcParam = append(funcParam, []string{param.Names[0].Name, "*" + ident.Name})
-				}
+				funcInParam = append(funcInParam, []string{param.Names[0].Name, "*" + expr.X.(*ast.Ident).Name})
+			case *ast.SelectorExpr:
+				// для контекста, и скорее всего для интерфейсынх типов, не проверялдо конца
+				funcInParam = append(funcInParam, []string{param.Names[0].Name, expr.X.(*ast.Ident).Name + "." + expr.Sel.Name})
 			}
 			//for _, name := range param.Names {
 			//	fmt.Printf("  %s %s\n", name.Name, param.Type.(*ast.SelectorExpr).Sel)
 			//}
 		}
-		//fmt.Println(funcParam)
+		//массив хранения исходящих параметров [название(если есть), тип]
+		funcOutParam := make([][]string, 0)
+		for _, param := range fnc.Type.Results.List {
+			resultRow := []string{"", ""}
+			if len(param.Names) > 0 {
+				resultRow[0] = param.Names[0].Name
+			}
+			switch expr := param.Type.(type) {
+			case *ast.Ident:
+				// простой тип
+				resultRow[1] = expr.Name
+				funcOutParam = append(funcOutParam, resultRow)
+			case *ast.StarExpr:
+				// Указатель на тип
+				resultRow[1] = "*" + expr.X.(*ast.Ident).Name
+				funcOutParam = append(funcOutParam, resultRow)
+			case *ast.SelectorExpr:
+				// для контекста, и скорее всего для интерфейсынх типов, не проверялдо конца
+				resultRow[1] = expr.X.(*ast.Ident).Name + "." + expr.Sel.Name
+				funcOutParam = append(funcOutParam, resultRow)
+			}
+		}
+		fmt.Println(funcOutParam)
 
-		//if _, ok := APIparts[recvType]; ok {
-		//	APIparts[recvType] = append(APIparts[recvType], FuncInfo{opts.Url, fnc.Name.String()})
-		//} else {
-		//	APIparts[recvType] = []FuncInfo{FuncInfo{opts.Url, fnc.Name.String()}}
-		//}
+		if _, ok := APIparts[recvType]; ok {
+			APIparts[recvType] = append(APIparts[recvType], FuncInfo{opts.Url, fnc.Name.String(), funcInParam, funcOutParam})
+		} else {
+			APIparts[recvType] = []FuncInfo{FuncInfo{opts.Url, fnc.Name.String(), funcInParam, funcOutParam}}
+		}
 		//fmt.Println(fnc.Name, fnc.Doc.Text(), fnc.Recv.List[0].Names[0], fnc.Recv.List[0].)
 		//fmt.Printf("%+v\n", fnc.Recv.List[0].Type.(*ast.StarExpr).X)
 
@@ -328,7 +356,11 @@ func main() {
 		//
 		//	}
 	}
-	//fmt.Println(APIparts)
+	fmt.Println(APIparts)
+	//for recvType, info := range APIparts {
+	//	ServeHTTPtmpl.Execute(os.Stdout, ParamsServeHTTP{recvType, info})
+	//}
+
 	for recvType, info := range APIparts {
 		ServeHTTPtmpl.Execute(os.Stdout, ParamsServeHTTP{recvType, info})
 	}
