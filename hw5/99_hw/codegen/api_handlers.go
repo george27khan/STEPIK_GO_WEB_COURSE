@@ -1,631 +1,582 @@
 package main
-
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
-)
+		"context"
+		"fmt"
+		"net/http"
+		"strconv"
+		"strings"
+		"encoding/json"
+		"io"
+		"net/url"
+	)
 
 func TagToMap(tag string) map[string]string {
-	tag, _ = strings.CutPrefix(tag, "apivalidator:\"")
-	tag, _ = strings.CutSuffix(tag, "\"")
-	optsMap := make(map[string]string)
-	for _, opt := range strings.Split(tag, ",") {
-		optParts := strings.Split(opt, "=")
-		if len(optParts) > 1 {
-			optsMap[optParts[0]] = optParts[1]
+		tag, _ = strings.CutPrefix(tag, "apivalidator:\"")
+		tag, _ = strings.CutSuffix(tag, "\"")
+		optsMap := make(map[string]string)
+		for _, opt := range strings.Split(tag, ",") {
+			optParts := strings.Split(opt, "=")
+			if len(optParts)>1{
+				optsMap[optParts[0]] = optParts[1]
+			} else {
+				optsMap[optParts[0]]=""
+			}
+		}
+		return optsMap
+	}
+
+		func (h *MyApi) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+				
+				case "/user/profile":
+					if false && r.Header.Get("X-Auth")!="100500" {
+						w.WriteHeader(http.StatusForbidden)
+						w.Write([]byte("{\"error\": \"unauthorized\"}"))
+						return
+					}
+					if r.Method != ""&&""!="" {
+						w.WriteHeader(http.StatusNotAcceptable)
+						w.Write([]byte("{\"error\": \"bad method\"}"))
+						return
+					}
+					h.wrapperProfile(w, r)
+				
+				case "/user/create":
+					if true && r.Header.Get("X-Auth")!="100500" {
+						w.WriteHeader(http.StatusForbidden)
+						w.Write([]byte("{\"error\": \"unauthorized\"}"))
+						return
+					}
+					if r.Method != "POST"&&"POST"!="" {
+						w.WriteHeader(http.StatusNotAcceptable)
+						w.Write([]byte("{\"error\": \"bad method\"}"))
+						return
+					}
+					h.wrapperCreate(w, r)
+				
+				default:
+					w.WriteHeader(http.StatusNotFound)
+					w.Write([]byte("{\"error\": \"unknown method\"}"))
+			}
+		}
+		
+		func (h *MyApi) wrapperProfile(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		// заполнение структуры params
+		// валидирование параметров
+			
+		var (
+			params ProfileParams
+			optsMap  map[string]string
+			queryParam	url.Values
+			err error
+		)
+		checkParamInt := func(optsMap map[string]string, paramName string) (res int, errRes error) {
+			param:=""
+			paramName = strings.ToLower(paramName)
+			// сперва проверка опции подмены имени атрибута
+			if paramNameTag, ok := optsMap["paramname"]; ok {
+				param = queryParam.Get(paramNameTag)
+				delete(optsMap, "paramname") 
+			} else {
+				param =  queryParam.Get(paramName)
+				delete(optsMap, "paramname") 
+			}
+			if res, err = strconv.Atoi(param); err!=nil{
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be int\"}", paramName)))
+				errRes = fmt.Errorf("error")
+				return
+			}
+			// далее проверяем остальные параметры
+			for opt, val := range optsMap{
+				if opt == "required" && res==0 {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", paramName)))
+					errRes = fmt.Errorf("error")
+					return
+				}
+				// если есть дефолт значение и параметр принял дефолт значение типа
+				if opt == "default" && res==0 {
+					res,_ = strconv.Atoi(val)
+				}
+				// если есть ограничения min
+				if opt == "min"{
+					if minVal, err := strconv.Atoi(val); err!=nil ||  res < minVal{
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be >= %v\"}", paramName, minVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+				// если есть ограничения max
+				if opt == "max"{
+					if maxVal, err := strconv.Atoi(val); err!=nil ||  res > maxVal {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be <= %v\"}", paramName, maxVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+			}
+			return
+		}
+
+		checkParamStr := func(optsMap map[string]string, paramName string) (res string, errRes error) {
+			paramName = strings.ToLower(paramName)
+			// сперва проверка опции подмены имени атрибута
+			if paramNameTag, ok := optsMap["paramname"]; ok {
+				res = queryParam.Get(paramNameTag)
+				delete(optsMap, "paramname") 
+			} else {
+				res = queryParam.Get(paramName)
+			}
+			// если есть дефолт значение в теге и параметр принял дефолт значение типа
+			if defVal, ok := optsMap["default"]; ok && res == "" {
+				res = defVal
+				delete(optsMap, "paramname")
+			}
+			// далее проверяем остальные параметры
+			for opt, val := range optsMap{
+				if opt == "required" && res=="" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", paramName)))
+					errRes = fmt.Errorf("error")
+					return
+				}
+				// если есть ограничения по значениям
+				if opt == "enum"{
+					ok := false
+					for _, item := range strings.Split(val, "|") {
+						if res == item {
+							ok = true
+							break
+						}
+					}
+					if !ok {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", paramName, strings.ReplaceAll(val,"|",", "))))	
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+				// если есть ограничения min
+				if opt == "min"{
+					if minVal, err := strconv.Atoi(val); err!=nil || len(res) < minVal{
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", paramName,minVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+			}
+			return
+		}
+checkParamInt=checkParamInt
+checkParamStr=checkParamStr
+		if r.Method == http.MethodPost {
+			// Считывание тела запроса
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Ошибка при чтении тела запроса", http.StatusInternalServerError)
+				return
+			}
+			// Разбор строки с использованием url.ParseQuery
+			queryParam, _ = url.ParseQuery(string(body))
 		} else {
-			optsMap[optParts[0]] = ""
+			queryParam = r.URL.Query()
 		}
-	}
-	fmt.Println(optsMap)
-	return optsMap
-}
-
-func (h *MyApi) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Path {
-
-	case "/user/profile":
-		if false && r.Header.Get("X-Auth") != "100500" {
-			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("{\"error\": \"unauthorized\"}"))
-			return
+		
+		
+			optsMap = TagToMap(`apivalidator:"required"`)
+			if params.Login, err = checkParamStr(optsMap, "Login"); err!=nil{
+				return
+			}
+		
+		
+			res, err := h.Profile(ctx, params)
+			// обработка ошибки
+			if err != nil {
+				switch err.(type) {
+				case ApiError:
+					apiErr := err.(ApiError)
+					w.WriteHeader(apiErr.HTTPStatus)
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+				return
+			}
+			// обработка успешного ответа
+			respMap := map[string]interface{} {"error": "", "response":res}
+			resp, err := json.Marshal(&respMap)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			w.Write(resp)
 		}
-		if r.Method != "" && "" != "" {
-			w.WriteHeader(http.StatusNotAcceptable)
-			w.Write([]byte("{\"error\": \"bad method\"}"))
-			return
-		}
-		h.wrapperProfile(w, r)
-
-	case "/user/create":
-		if true && r.Header.Get("X-Auth") != "100500" {
-			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("{\"error\": \"unauthorized\"}"))
-			return
-		}
-		if r.Method != "POST" && "POST" != "" {
-			w.WriteHeader(http.StatusNotAcceptable)
-			w.Write([]byte("{\"error\": \"bad method\"}"))
-			return
-		}
-		h.wrapperCreate(w, r)
-
-	default:
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"unknown method\"}"))
-	}
-}
-
-func (h *MyApi) wrapperProfile(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-	// заполнение структуры params
-	// валидирование параметров
-
-	var (
-		params     ProfileParams
-		optsMap    map[string]string
-		queryParam url.Values
-		err        error
-	)
-	if r.Method == http.MethodPost {
-		// Считывание тела запроса
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Ошибка при чтении тела запроса", http.StatusInternalServerError)
-			return
-		}
-		// Разбор строки с использованием url.ParseQuery
-		queryParam, _ = url.ParseQuery(string(body))
-	} else {
-		queryParam = r.URL.Query()
-	}
-
-	optsMap = TagToMap(`apivalidator:"required"`)
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		params.Login = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		params.Login = queryParam.Get(strings.ToLower("Login"))
-	}
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Login == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Login"))))
-			return
-		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Login == "" {
-			params.Login = val
-		}
-		// если есть ограничения по значениям
-		if opt == "enum" {
-			ok := false
-			for _, item := range strings.Split(val, "|") {
-				if params.Login == item {
-					ok = true
-					break
+		
+		func (h *MyApi) wrapperCreate(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		// заполнение структуры params
+		// валидирование параметров
+			
+		var (
+			params CreateParams
+			optsMap  map[string]string
+			queryParam	url.Values
+			err error
+		)
+		checkParamInt := func(optsMap map[string]string, paramName string) (res int, errRes error) {
+			param:=""
+			paramName = strings.ToLower(paramName)
+			// сперва проверка опции подмены имени атрибута
+			if paramNameTag, ok := optsMap["paramname"]; ok {
+				param = queryParam.Get(paramNameTag)
+				delete(optsMap, "paramname") 
+			} else {
+				param =  queryParam.Get(paramName)
+				delete(optsMap, "paramname") 
+			}
+			if res, err = strconv.Atoi(param); err!=nil{
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be int\"}", paramName)))
+				errRes = fmt.Errorf("error")
+				return
+			}
+			// далее проверяем остальные параметры
+			for opt, val := range optsMap{
+				if opt == "required" && res==0 {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", paramName)))
+					errRes = fmt.Errorf("error")
+					return
+				}
+				// если есть дефолт значение и параметр принял дефолт значение типа
+				if opt == "default" && res==0 {
+					res,_ = strconv.Atoi(val)
+				}
+				// если есть ограничения min
+				if opt == "min"{
+					if minVal, err := strconv.Atoi(val); err!=nil ||  res < minVal{
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be >= %v\"}", paramName, minVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+				// если есть ограничения max
+				if opt == "max"{
+					if maxVal, err := strconv.Atoi(val); err!=nil ||  res > maxVal {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be <= %v\"}", paramName, maxVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
 				}
 			}
-			if !ok {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", strings.ToLower("Login"), strings.ReplaceAll("", "|", ", "))))
-				return
-			}
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || len(params.Login) < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", strings.ToLower("Login"), minVal)))
-				return
-			}
-		}
-	}
-
-	fmt.Println("in params", params)
-
-	res, err := h.Profile(ctx, params)
-	// обработка ошибки
-	if err != nil {
-		switch err.(type) {
-		case ApiError:
-			apiErr := err.(ApiError)
-			w.WriteHeader(apiErr.HTTPStatus)
-		default:
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
-		return
-	}
-	// обработка успешного ответа
-	respMap := map[string]interface{}{"error": "", "response": res}
-	resp, err := json.Marshal(&respMap)
-	fmt.Println("resp", resp)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-	w.Write(resp)
-}
-
-func (h *MyApi) wrapperCreate(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-	// заполнение структуры params
-	// валидирование параметров
-
-	var (
-		params     CreateParams
-		optsMap    map[string]string
-		queryParam url.Values
-		err        error
-	)
-	if r.Method == http.MethodPost {
-		// Считывание тела запроса
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Ошибка при чтении тела запроса", http.StatusInternalServerError)
 			return
 		}
-		// Разбор строки с использованием url.ParseQuery
-		queryParam, _ = url.ParseQuery(string(body))
-	} else {
-		queryParam = r.URL.Query()
-	}
 
-	optsMap = TagToMap(`apivalidator:"min=0,max=128"`)
-	paramAge := ""
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		paramAge = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		paramAge = queryParam.Get(strings.ToLower("Age"))
-		delete(optsMap, "paramname")
-	}
-	if params.Age, err = strconv.Atoi(paramAge); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be int\"}", strings.ToLower("Age"))))
-		return
-	}
-
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Age == 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Age"))))
-			return
-		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Age == 0 {
-			params.Age, _ = strconv.Atoi(val)
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || params.Age < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be >= %v\"}", strings.ToLower("Age"), minVal)))
-				return
+		checkParamStr := func(optsMap map[string]string, paramName string) (res string, errRes error) {
+			paramName = strings.ToLower(paramName)
+			// сперва проверка опции подмены имени атрибута
+			if paramNameTag, ok := optsMap["paramname"]; ok {
+				res = queryParam.Get(paramNameTag)
+				delete(optsMap, "paramname") 
+			} else {
+				res = queryParam.Get(paramName)
 			}
-		}
-		// если есть ограничения max
-		if opt == "max" {
-			if maxVal, err := strconv.Atoi(val); err != nil || params.Age > maxVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be <= %v\"}", strings.ToLower("Age"), maxVal)))
-				return
+			// если есть дефолт значение в теге и параметр принял дефолт значение типа
+			if defVal, ok := optsMap["default"]; ok && res == "" {
+				res = defVal
+				delete(optsMap, "paramname")
 			}
-		}
-	}
-
-	optsMap = TagToMap(`apivalidator:"required,min=10"`)
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		params.Login = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		params.Login = queryParam.Get(strings.ToLower("Login"))
-	}
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Login == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Login"))))
-			return
-		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Login == "" {
-			params.Login = val
-		}
-		// если есть ограничения по значениям
-		if opt == "enum" {
-			ok := false
-			for _, item := range strings.Split(val, "|") {
-				if params.Login == item {
-					ok = true
-					break
+			// далее проверяем остальные параметры
+			for opt, val := range optsMap{
+				if opt == "required" && res=="" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", paramName)))
+					errRes = fmt.Errorf("error")
+					return
+				}
+				// если есть ограничения по значениям
+				if opt == "enum"{
+					ok := false
+					for _, item := range strings.Split(val, "|") {
+						if res == item {
+							ok = true
+							break
+						}
+					}
+					if !ok {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", paramName, strings.ReplaceAll(val,"|",", "))))	
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+				// если есть ограничения min
+				if opt == "min"{
+					if minVal, err := strconv.Atoi(val); err!=nil || len(res) < minVal{
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", paramName,minVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
 				}
 			}
-			if !ok {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", strings.ToLower("Login"), strings.ReplaceAll("", "|", ", "))))
-				return
-			}
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || len(params.Login) < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", strings.ToLower("Login"), minVal)))
-				return
-			}
-		}
-	}
-
-	optsMap = TagToMap(`apivalidator:"paramname=full_name"`)
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		params.Name = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		params.Name = queryParam.Get(strings.ToLower("Name"))
-	}
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Name == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Name"))))
 			return
 		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Name == "" {
-			params.Name = val
+checkParamInt=checkParamInt
+checkParamStr=checkParamStr
+		if r.Method == http.MethodPost {
+			// Считывание тела запроса
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Ошибка при чтении тела запроса", http.StatusInternalServerError)
+				return
+			}
+			// Разбор строки с использованием url.ParseQuery
+			queryParam, _ = url.ParseQuery(string(body))
+		} else {
+			queryParam = r.URL.Query()
 		}
-		// если есть ограничения по значениям
-		if opt == "enum" {
-			ok := false
-			for _, item := range strings.Split(val, "|") {
-				if params.Name == item {
-					ok = true
-					break
+		
+            optsMap = TagToMap(`apivalidator:"min=0,max=128"`)
+			if params.Age, err = checkParamInt(optsMap, "Age"); err!=nil{
+				return
+			}
+		
+		
+			optsMap = TagToMap(`apivalidator:"required,min=10"`)
+			if params.Login, err = checkParamStr(optsMap, "Login"); err!=nil{
+				return
+			}
+		
+			optsMap = TagToMap(`apivalidator:"paramname=full_name"`)
+			if params.Name, err = checkParamStr(optsMap, "Name"); err!=nil{
+				return
+			}
+		
+			optsMap = TagToMap(`apivalidator:"enum=user|moderator|admin,default=user"`)
+			if params.Status, err = checkParamStr(optsMap, "Status"); err!=nil{
+				return
+			}
+		
+		
+			res, err := h.Create(ctx, params)
+			// обработка ошибки
+			if err != nil {
+				switch err.(type) {
+				case ApiError:
+					apiErr := err.(ApiError)
+					w.WriteHeader(apiErr.HTTPStatus)
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+				return
+			}
+			// обработка успешного ответа
+			respMap := map[string]interface{} {"error": "", "response":res}
+			resp, err := json.Marshal(&respMap)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			w.Write(resp)
+		}
+		
+		func (h *OtherApi) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+				
+				case "/user/create":
+					if true && r.Header.Get("X-Auth")!="100500" {
+						w.WriteHeader(http.StatusForbidden)
+						w.Write([]byte("{\"error\": \"unauthorized\"}"))
+						return
+					}
+					if r.Method != "POST"&&"POST"!="" {
+						w.WriteHeader(http.StatusNotAcceptable)
+						w.Write([]byte("{\"error\": \"bad method\"}"))
+						return
+					}
+					h.wrapperCreate(w, r)
+				
+				default:
+					w.WriteHeader(http.StatusNotFound)
+					w.Write([]byte("{\"error\": \"unknown method\"}"))
+			}
+		}
+		
+		func (h *OtherApi) wrapperCreate(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		// заполнение структуры params
+		// валидирование параметров
+			
+		var (
+			params OtherCreateParams
+			optsMap  map[string]string
+			queryParam	url.Values
+			err error
+		)
+		checkParamInt := func(optsMap map[string]string, paramName string) (res int, errRes error) {
+			param:=""
+			paramName = strings.ToLower(paramName)
+			// сперва проверка опции подмены имени атрибута
+			if paramNameTag, ok := optsMap["paramname"]; ok {
+				param = queryParam.Get(paramNameTag)
+				delete(optsMap, "paramname") 
+			} else {
+				param =  queryParam.Get(paramName)
+				delete(optsMap, "paramname") 
+			}
+			if res, err = strconv.Atoi(param); err!=nil{
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be int\"}", paramName)))
+				errRes = fmt.Errorf("error")
+				return
+			}
+			// далее проверяем остальные параметры
+			for opt, val := range optsMap{
+				if opt == "required" && res==0 {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", paramName)))
+					errRes = fmt.Errorf("error")
+					return
+				}
+				// если есть дефолт значение и параметр принял дефолт значение типа
+				if opt == "default" && res==0 {
+					res,_ = strconv.Atoi(val)
+				}
+				// если есть ограничения min
+				if opt == "min"{
+					if minVal, err := strconv.Atoi(val); err!=nil ||  res < minVal{
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be >= %v\"}", paramName, minVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+				// если есть ограничения max
+				if opt == "max"{
+					if maxVal, err := strconv.Atoi(val); err!=nil ||  res > maxVal {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be <= %v\"}", paramName, maxVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
 				}
 			}
-			if !ok {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", strings.ToLower("Name"), strings.ReplaceAll("", "|", ", "))))
-				return
-			}
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || len(params.Name) < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", strings.ToLower("Name"), minVal)))
-				return
-			}
-		}
-	}
-
-	optsMap = TagToMap(`apivalidator:"enum=user|moderator|admin,default=user"`)
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		params.Status = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		params.Status = queryParam.Get(strings.ToLower("Status"))
-	}
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Status == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Status"))))
 			return
 		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Status == "" {
-			params.Status = val
-		}
-		fmt.Println("val ", val)
-		// если есть ограничения по значениям
-		if opt == "enum" {
-			ok := false
-			for _, item := range strings.Split(val, "|") {
-				if params.Status == item {
-					ok = true
-					break
+
+		checkParamStr := func(optsMap map[string]string, paramName string) (res string, errRes error) {
+			paramName = strings.ToLower(paramName)
+			// сперва проверка опции подмены имени атрибута
+			if paramNameTag, ok := optsMap["paramname"]; ok {
+				res = queryParam.Get(paramNameTag)
+				delete(optsMap, "paramname") 
+			} else {
+				res = queryParam.Get(paramName)
+			}
+			// если есть дефолт значение в теге и параметр принял дефолт значение типа
+			if defVal, ok := optsMap["default"]; ok && res == "" {
+				res = defVal
+				delete(optsMap, "paramname")
+			}
+			// далее проверяем остальные параметры
+			for opt, val := range optsMap{
+				if opt == "required" && res=="" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", paramName)))
+					errRes = fmt.Errorf("error")
+					return
+				}
+				// если есть ограничения по значениям
+				if opt == "enum"{
+					ok := false
+					for _, item := range strings.Split(val, "|") {
+						if res == item {
+							ok = true
+							break
+						}
+					}
+					if !ok {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", paramName, strings.ReplaceAll(val,"|",", "))))	
+						errRes = fmt.Errorf("error")
+						return
+					}
+				}
+				// если есть ограничения min
+				if opt == "min"{
+					if minVal, err := strconv.Atoi(val); err!=nil || len(res) < minVal{
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", paramName,minVal)))
+						errRes = fmt.Errorf("error")
+						return
+					}
 				}
 			}
-			if !ok {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", strings.ToLower("Status"), strings.ReplaceAll(val, "|", ", "))))
+			return
+		}
+checkParamInt=checkParamInt
+checkParamStr=checkParamStr
+		if r.Method == http.MethodPost {
+			// Считывание тела запроса
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Ошибка при чтении тела запроса", http.StatusInternalServerError)
 				return
 			}
+			// Разбор строки с использованием url.ParseQuery
+			queryParam, _ = url.ParseQuery(string(body))
+		} else {
+			queryParam = r.URL.Query()
 		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || len(params.Status) < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", strings.ToLower("Status"), minVal)))
+		
+            optsMap = TagToMap(`apivalidator:"min=1,max=50"`)
+			if params.Level, err = checkParamInt(optsMap, "Level"); err!=nil{
 				return
 			}
-		}
-	}
-
-	fmt.Println("in params", params)
-
-	res, err := h.Create(ctx, params)
-	// обработка ошибки
-	if err != nil {
-		switch err.(type) {
-		case ApiError:
-			apiErr := err.(ApiError)
-			w.WriteHeader(apiErr.HTTPStatus)
-		default:
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
-		return
-	}
-	// обработка успешного ответа
-	respMap := map[string]interface{}{"error": "", "response": res}
-	resp, err := json.Marshal(&respMap)
-	fmt.Println("resp", resp)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-	w.Write(resp)
-}
-
-func (h *OtherApi) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Path {
-
-	case "/user/create":
-		if true && r.Header.Get("X-Auth") != "100500" {
-			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("{\"error\": \"unauthorized\"}"))
-			return
-		}
-		if r.Method != "POST" && "POST" != "" {
-			w.WriteHeader(http.StatusNotAcceptable)
-			w.Write([]byte("{\"error\": \"bad method\"}"))
-			return
-		}
-		h.wrapperCreate(w, r)
-
-	default:
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"unknown method\"}"))
-	}
-}
-
-func (h *OtherApi) wrapperCreate(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-	// заполнение структуры params
-	// валидирование параметров
-
-	var (
-		params     OtherCreateParams
-		optsMap    map[string]string
-		queryParam url.Values
-		err        error
-	)
-	if r.Method == http.MethodPost {
-		// Считывание тела запроса
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Ошибка при чтении тела запроса", http.StatusInternalServerError)
-			return
-		}
-		// Разбор строки с использованием url.ParseQuery
-		queryParam, _ = url.ParseQuery(string(body))
-	} else {
-		queryParam = r.URL.Query()
-	}
-
-	optsMap = TagToMap(`apivalidator:"min=1,max=50"`)
-	paramLevel := ""
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		paramLevel = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		paramLevel = queryParam.Get(strings.ToLower("Level"))
-		delete(optsMap, "paramname")
-	}
-	if params.Level, err = strconv.Atoi(paramLevel); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be int\"}", strings.ToLower("Level"))))
-		return
-	}
-
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Level == 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Level"))))
-			return
-		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Level == 0 {
-			params.Level, _ = strconv.Atoi(val)
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || params.Level < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be >= %v\"}", strings.ToLower("Level"), minVal)))
+		
+		
+			optsMap = TagToMap(`apivalidator:"required,min=3"`)
+			if params.Username, err = checkParamStr(optsMap, "Username"); err!=nil{
 				return
 			}
-		}
-		// если есть ограничения max
-		if opt == "max" {
-			if maxVal, err := strconv.Atoi(val); err != nil || params.Level > maxVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be <= %v\"}", strings.ToLower("Level"), maxVal)))
+		
+			optsMap = TagToMap(`apivalidator:"paramname=account_name"`)
+			if params.Name, err = checkParamStr(optsMap, "Name"); err!=nil{
 				return
 			}
-		}
-	}
-
-	optsMap = TagToMap(`apivalidator:"required,min=3"`)
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		params.Username = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		params.Username = queryParam.Get(strings.ToLower("Username"))
-	}
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Username == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Username"))))
-			return
-		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Username == "" {
-			params.Username = val
-		}
-		// если есть ограничения по значениям
-		if opt == "enum" {
-			ok := false
-			for _, item := range strings.Split(val, "|") {
-				if params.Username == item {
-					ok = true
-					break
+		
+			optsMap = TagToMap(`apivalidator:"enum=warrior|sorcerer|rouge,default=warrior"`)
+			if params.Class, err = checkParamStr(optsMap, "Class"); err!=nil{
+				return
+			}
+		
+		
+			res, err := h.Create(ctx, params)
+			// обработка ошибки
+			if err != nil {
+				switch err.(type) {
+				case ApiError:
+					apiErr := err.(ApiError)
+					w.WriteHeader(apiErr.HTTPStatus)
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
 				}
-			}
-			if !ok {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", strings.ToLower("Username"), strings.ReplaceAll("", "|", ", "))))
+				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 				return
 			}
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || len(params.Username) < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", strings.ToLower("Username"), minVal)))
-				return
+			// обработка успешного ответа
+			respMap := map[string]interface{} {"error": "", "response":res}
+			resp, err := json.Marshal(&respMap)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
 			}
+			w.Write(resp)
 		}
-	}
-
-	optsMap = TagToMap(`apivalidator:"paramname=account_name"`)
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		params.Name = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		params.Name = queryParam.Get(strings.ToLower("Name"))
-	}
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Name == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Name"))))
-			return
-		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Name == "" {
-			params.Name = val
-		}
-		// если есть ограничения по значениям
-		if opt == "enum" {
-			ok := false
-			for _, item := range strings.Split(val, "|") {
-				if params.Name == item {
-					ok = true
-					break
-				}
-			}
-			if !ok {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", strings.ToLower("Name"), strings.ReplaceAll("", "|", ", "))))
-				return
-			}
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || len(params.Name) < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", strings.ToLower("Name"), minVal)))
-				return
-			}
-		}
-	}
-
-	optsMap = TagToMap(`apivalidator:"enum=warrior|sorcerer|rouge,default=warrior"`)
-	// сперва проверка опции подмены имени атрибута
-	if paramName, ok := optsMap["paramname"]; ok {
-		params.Class = queryParam.Get(paramName)
-		delete(optsMap, "paramname")
-	} else {
-		params.Class = queryParam.Get(strings.ToLower("Class"))
-	}
-	// далее проверяем остальные параметры
-	for opt, val := range optsMap {
-		if opt == "required" && params.Class == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must me not empty\"}", strings.ToLower("Class"))))
-			return
-		}
-		// если есть дефолт значение и параметр принял дефолт значение
-		if opt == "default" && params.Class == "" {
-			params.Class = val
-		}
-		// если есть ограничения по значениям
-		if opt == "enum" {
-			ok := false
-			for _, item := range strings.Split(val, "|") {
-				if params.Class == item {
-					ok = true
-					break
-				}
-			}
-			if !ok {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s must be one of [%s]\"}", strings.ToLower("Class"), strings.ReplaceAll("", "|", ", "))))
-				return
-			}
-		}
-		// если есть ограничения min
-		if opt == "min" {
-			if minVal, err := strconv.Atoi(val); err != nil || len(params.Class) < minVal {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(fmt.Sprintf("{\"error\": \"%s len must be >= %v\"}", strings.ToLower("Class"), minVal)))
-				return
-			}
-		}
-	}
-
-	fmt.Println("in params", params)
-
-	res, err := h.Create(ctx, params)
-	// обработка ошибки
-	if err != nil {
-		switch err.(type) {
-		case ApiError:
-			apiErr := err.(ApiError)
-			w.WriteHeader(apiErr.HTTPStatus)
-		default:
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
-		return
-	}
-	// обработка успешного ответа
-	respMap := map[string]interface{}{"error": "", "response": res}
-	resp, err := json.Marshal(&respMap)
-	fmt.Println("resp", resp)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-	w.Write(resp)
-}
+		
