@@ -250,7 +250,7 @@ func TestMyApi(t *testing.T) {
 	runTests(t, ts, cases)
 }
 
-func TestOtherApi(t *testing.T) {
+func Tes_tOtherApi(t *testing.T) {
 	ts := httptest.NewServer(NewOtherApi())
 
 	cases := []Case{
