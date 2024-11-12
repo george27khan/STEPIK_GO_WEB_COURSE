@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -196,7 +197,6 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 		err          error
 		ok           bool
 	)
-	fmt.Println("-------------------")
 	pathParts := strings.Split(r.URL.Path, "/")
 	tableName = pathParts[1]
 	if id, err = strconv.Atoi(pathParts[2]); err != nil {
@@ -204,21 +204,12 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("{\"error\": \"record not found\"}"))
 		return
 	}
-	fmt.Println("tableName", tableName)
-	fmt.Println("id", id)
 	if colsInfo, ok = exp.TabsInfo[tableName]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
 	}
 	rows, err := exp.DB.Query(fmt.Sprintf("select * from %s where id = ?", tableName), id)
-	if !rows.NextResultSet() {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"record not found\"}"))
-		return
-	}
-	//fmt.Println(fmt.Sprintf("rows.Err()", rows.Err()))
-	//fmt.Println(fmt.Sprintf("rows.NextResultSet()", rows.NextResultSet()))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
@@ -227,19 +218,23 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	attrs := make([]interface{}, len(colsInfo))
-	attrsPntr := make([]interface{}, len(colsInfo))
-	for i, _ := range attrsPntr {
-		attrsPntr[i] = &attrs[i]
-	}
-	if colNameSlice, err = rows.Columns(); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
-		fmt.Println(fmt.Sprintf("{\"error\": \"%s\"}", err.Error()))
+	if !rows.Next() {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("{\"error\": \"record not found\"}"))
 		return
-	}
-	result := make(map[string]interface{}, 1)
-	for rows.Next() {
+	} else {
+		attrs := make([]interface{}, len(colsInfo))
+		attrsPntr := make([]interface{}, len(colsInfo))
+		for i, _ := range attrsPntr {
+			attrsPntr[i] = &attrs[i]
+		}
+		if colNameSlice, err = rows.Columns(); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+			fmt.Println(fmt.Sprintf("{\"error\": \"%s\"}", err.Error()))
+			return
+		}
+		result := make(map[string]interface{}, 1)
 		if err = rows.Scan(attrsPntr...); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
@@ -254,10 +249,10 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 				result[name] = attrs[j]
 			}
 		}
+		js, _ := json.Marshal(result)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("{\"response\": {\"record\": %s}}", string(js))))
 	}
-	js, _ := json.Marshal(result)
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("{\"response\": {\"record\": %s}}", string(js))))
 }
 
 func (exp *DBexplorer) rootHandler(w http.ResponseWriter, r *http.Request) {
@@ -272,6 +267,7 @@ func (exp *DBexplorer) rootHandler(w http.ResponseWriter, r *http.Request) {
 		for tabName, _ := range exp.TabsInfo {
 			tables = append(tables, tabName)
 		}
+		sort.Strings(tables)
 		if resp, err := json.Marshal(respMap{"response": respMap{"tables": tables}}); err != nil {
 			slog.Error(err.Error())
 			w.WriteHeader(http.StatusInternalServerError)
