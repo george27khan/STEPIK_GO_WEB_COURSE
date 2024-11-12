@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -184,8 +185,57 @@ func (exp *DBexplorer) tableRowHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		exp.getRow(w, r)
 	} else if r.Method == http.MethodPut {
-
+		exp.putRow(w, r)
 	}
+}
+
+func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
+	var (
+		tableName string
+		//colNameSlice []string
+		colsInfo []colInfo
+		ok       bool
+		incomRow map[string]interface{}
+	)
+	tableName = strings.Split(r.URL.Path, "/")[1]
+	if colsInfo, ok = exp.TabsInfo[tableName]; !ok {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("{\"error\": \"unknown table\"}"))
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	incomRow = make(map[string]interface{})
+	if err := json.Unmarshal(body, &incomRow); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+		return
+	}
+	exp.DB.Exec("insert into %s values(?)", tableName)
+	insertCols := strings.Builder{}
+	insertVals := strings.Builder{}
+	for _, attr := range colsInfo {
+		//проверяем наличие атрибута
+		if val, ok := incomRow[attr.Field.String]; !ok {
+			//если атрибута нету и он в базе определен как not null, то завершаем работу
+			if attr.Null.String == "NO" {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("{\"error\": \"empty param value\"}"))
+				return
+			}
+		} else {
+			insertCols.WriteString(attr.Field.String)
+			insertCols.WriteString(",")
+			insertVals.WriteString("?,")
+		}
+	}
+	fmt.Println("body", colsInfo)
+	fmt.Println("body", incomRow)
+
 }
 
 func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
