@@ -186,6 +186,8 @@ func (exp *DBexplorer) tableRowHandler(w http.ResponseWriter, r *http.Request) {
 		exp.getRow(w, r)
 	} else if r.Method == http.MethodPut {
 		exp.putRow(w, r)
+	} else if r.Method == http.MethodPost {
+		exp.postRow(w, r)
 	}
 }
 
@@ -193,9 +195,10 @@ func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
 	var (
 		tableName string
 		//colNameSlice []string
-		colsInfo []colInfo
-		ok       bool
-		incomRow map[string]interface{}
+		colsInfo    []colInfo
+		ok          bool
+		incomRow    map[string]interface{}
+		attrsInsert []interface{}
 	)
 	tableName = strings.Split(r.URL.Path, "/")[1]
 	if colsInfo, ok = exp.TabsInfo[tableName]; !ok {
@@ -215,27 +218,111 @@ func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 		return
 	}
-	exp.DB.Exec("insert into %s values(?)", tableName)
 	insertCols := strings.Builder{}
 	insertVals := strings.Builder{}
+	attrsInsert = make([]interface{}, 0, len(incomRow))
 	for _, attr := range colsInfo {
 		//проверяем наличие атрибута
 		if val, ok := incomRow[attr.Field.String]; !ok {
-			//если атрибута нету и он в базе определен как not null, то завершаем работу
-			if attr.Null.String == "NO" {
+			//если атрибута нету и он в базе определен как not null и не определено дефолт значение, то завершаем работу
+			if attr.Null.String == "NO" && attr.DefaultValue.String == "" {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte("{\"error\": \"empty param value\"}"))
 				return
 			}
-		} else {
+		} else if attr.Extra.String != "auto_increment" {
+			// добавляем атрибут в запрос только если не автоинкремент
 			insertCols.WriteString(attr.Field.String)
 			insertCols.WriteString(",")
 			insertVals.WriteString("?,")
+			attrsInsert = append(attrsInsert, val)
 		}
 	}
-	fmt.Println("body", colsInfo)
-	fmt.Println("body", incomRow)
+	result, err := exp.DB.Exec(fmt.Sprintf("insert into %s (%s) values(%s)",
+		tableName,
+		strings.TrimRight(insertCols.String(), ","),
+		strings.TrimRight(insertVals.String(), ",")),
+		attrsInsert...,
+	)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("{\"error\": \"insert error\"}"))
+		return
+	}
+	if id, err := result.LastInsertId(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("{\"error\": \"get last id error\"}"))
+		return
+	} else {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("{\"response\": {\"id\": %v}}", id)))
+		return
+	}
+}
 
+func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
+	var (
+		tableName string
+		ok        bool
+		id        int
+		err       error
+	)
+	pathParts := strings.Split(r.URL.Path, "/")
+	tableName = pathParts[1]
+	//получаем id записи из запроса
+	if id, err = strconv.Atoi(pathParts[2]); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("{\"error\": \"record not found\"}"))
+		return
+	}
+	if _, ok = exp.TabsInfo[tableName]; !ok {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("{\"error\": \"unknown table\"}"))
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	incomUpdAttr := make(map[string]interface{})
+	if err := json.Unmarshal(body, &incomUpdAttr); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+		return
+	}
+	updateCols := strings.Builder{}
+	valsUpdate := make([]interface{}, 0, len(incomUpdAttr))
+
+	for attr, val := range incomUpdAttr {
+
+		updateCols.WriteString(attr)
+		updateCols.WriteString(" = ?,")
+		valsUpdate = append(valsUpdate, val)
+	}
+	valsUpdate = append(valsUpdate, id)
+	result, err := exp.DB.Exec(fmt.Sprintf("update %s set %s where id = ?",
+		tableName,
+		strings.TrimRight(updateCols.String(), ",")),
+		valsUpdate...)
+
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+		return
+	}
+
+	if updatedRows, err := result.RowsAffected(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+		return
+	} else {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("{\"response\": {\"updated\": %v}}", updatedRows)))
+		return
+	}
 }
 
 func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
@@ -249,11 +336,13 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 	)
 	pathParts := strings.Split(r.URL.Path, "/")
 	tableName = pathParts[1]
+	//получаем id записи из запроса
 	if id, err = strconv.Atoi(pathParts[2]); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"record not found\"}"))
 		return
 	}
+
 	if colsInfo, ok = exp.TabsInfo[tableName]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
@@ -263,12 +352,11 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
-		fmt.Println(fmt.Sprintf("{\"error\": \"%s\"}", err.Error()))
 		return
 	}
 	defer rows.Close()
 
-	if !rows.Next() {
+	if !rows.Next() { // проверяем нашли ли записи, если нет, то ошибка
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"record not found\"}"))
 		return
