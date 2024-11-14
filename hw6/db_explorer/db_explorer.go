@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,7 +19,7 @@ import (
 // CaseResponse
 type respMap map[string]interface{}
 
-type colInfo struct {
+type colDescr struct {
 	Field        sql.NullString
 	TypeName     sql.NullString
 	Collation    sql.NullString
@@ -30,8 +31,13 @@ type colInfo struct {
 	Comment      sql.NullString
 }
 
+type tableInfo struct {
+	Cols  []colDescr
+	PKCol string
+}
+
 type DBexplorer struct {
-	TabsInfo map[string][]colInfo
+	TabsInfo map[string]*tableInfo
 	DB       *sql.DB
 }
 
@@ -55,20 +61,22 @@ func initTables(db *sql.DB) (tables []string) {
 
 // Создаем "конструктор" для Person с зачитыванием информации о таблицах
 func NewExplorer(db *sql.DB) *DBexplorer {
-	var col colInfo
-	colInfoMap := make(map[string][]colInfo)
+	var col colDescr
+	colInfoMap := make(map[string]*tableInfo)
 	for _, tableName := range initTables(db) {
 		cols, err := db.Query(fmt.Sprintf("SHOW FULL COLUMNS FROM %s", tableName))
 		if err != nil {
 			slog.Error(err.Error())
 			return nil
 		}
+		colInfoMap[tableName] = &tableInfo{}
+		colInfoMap[tableName].Cols = make([]colDescr, 0)
 		for cols.Next() {
 			if err := cols.Scan(&col.Field, &col.TypeName, &col.Collation, &col.Null, &col.Key, &col.DefaultValue, &col.Extra, &col.Privileges, &col.Comment); err != nil {
 				slog.Error(err.Error())
 				return nil
 			}
-			colInfoMap[tableName] = append(colInfoMap[tableName], col)
+			colInfoMap[tableName].Cols = append(colInfoMap[tableName].Cols, col)
 		}
 		cols.Close()
 	}
@@ -106,15 +114,18 @@ func (exp *DBexplorer) getRows(w http.ResponseWriter, r *http.Request) {
 		limitStr, offsetStr string
 		tableName           string
 		colNameSlice        []string
-		colsInfo            []colInfo
+		colsDescr []colDescr
 		ok                  bool
+		info  map[string]*tableInfo
 	)
 	tableName, _ = strings.CutPrefix(r.URL.Path, "/")
 
-	if colsInfo, ok = exp.TabsInfo[tableName]; !ok {
+	if info, ok = exp.TabsInfo[tableName]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
+	} else {
+		colsDescr = info.
 	}
 
 	if limitStr = r.URL.Query().Get("limit"); limitStr == "" {
@@ -188,6 +199,8 @@ func (exp *DBexplorer) tableRowHandler(w http.ResponseWriter, r *http.Request) {
 		exp.putRow(w, r)
 	} else if r.Method == http.MethodPost {
 		exp.postRow(w, r)
+	} else if r.Method == http.MethodDelete {
+		exp.deleteRow(w, r)
 	}
 }
 
@@ -263,6 +276,7 @@ func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
 func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 	var (
 		tableName string
+		tabInfo   []colInfo
 		ok        bool
 		id        int
 		err       error
@@ -275,7 +289,7 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("{\"error\": \"record not found\"}"))
 		return
 	}
-	if _, ok = exp.TabsInfo[tableName]; !ok {
+	if tabInfo, ok = exp.TabsInfo[tableName]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
@@ -286,6 +300,8 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	//распакрвываем тело в мап интерфейсов
 	incomUpdAttr := make(map[string]interface{})
 	if err := json.Unmarshal(body, &incomUpdAttr); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -294,9 +310,44 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 	}
 	updateCols := strings.Builder{}
 	valsUpdate := make([]interface{}, 0, len(incomUpdAttr))
-
+	//формируем куски запроса
 	for attr, val := range incomUpdAttr {
-
+		//проверка пришедших атрибутов и их значений
+		for _, info := range tabInfo {
+			if info.Field.String == attr {
+				// поиск среди полей на обновление PRIMARY KEY
+				if info.Key.String == "PRI" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"field %s have invalid type\"}", attr)))
+					return
+				}
+				//проверка обновления на null, если в базе поле как not null
+				if info.Null.String == "NO" && val == nil {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(fmt.Sprintf("{\"error\": \"field %s have invalid type\"}", attr)))
+					return
+				}
+				//проверка на типы пришедшего значения для поля, не все типы учтены...
+				switch val.(type) {
+				case float64:
+					if !strings.Contains(info.TypeName.String, "int") &&
+						!strings.Contains(info.TypeName.String, "float") &&
+						!strings.Contains(info.TypeName.String, "double") {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"field %s have invalid type\"}", attr)))
+						return
+					}
+				case string:
+					if info.TypeName.String != "text" && !strings.HasPrefix(info.TypeName.String, "varchar") {
+						w.WriteHeader(http.StatusBadRequest)
+						w.Write([]byte(fmt.Sprintf("{\"error\": \"field %s have invalid type\"}", attr)))
+						return
+					}
+				default:
+					fmt.Println("default")
+				}
+			}
+		}
 		updateCols.WriteString(attr)
 		updateCols.WriteString(" = ?,")
 		valsUpdate = append(valsUpdate, val)
@@ -325,6 +376,50 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func parseURL(url string, tabInfo map[string][]colInfo) (tableName string, id int, err error) {
+	pathParts := strings.Split(url, "/")
+	tableName = pathParts[1]
+	//получаем id записи из запроса
+	if id, err = strconv.Atoi(pathParts[2]); err != nil {
+		return "", 0, err
+	}
+	if _, ok := tabInfo[tableName]; !ok {
+		return "", 0, errors.New("table not found")
+	}
+	return tableName, id, nil
+}
+
+func (exp *DBexplorer) deleteRow(w http.ResponseWriter, r *http.Request) {
+	var (
+		tableName string
+		id        int
+		err       error
+	)
+	//разбираем URL
+	tableName, id, err = parseURL(r.URL.Path, exp.TabsInfo)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+	}
+	result, err := exp.DB.Exec(fmt.Sprintf("delete from %s where id = ?", tableName), id)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+		return
+	}
+
+	if deletedRows, err := result.RowsAffected(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+		return
+	} else {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("{\"response\": {\"deleted\": %v}}", deletedRows)))
+		return
+	}
+}
+
 func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 	var (
 		colNameSlice []string
@@ -348,6 +443,7 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
 	}
+
 	rows, err := exp.DB.Query(fmt.Sprintf("select * from %s where id = ?", tableName), id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -355,7 +451,7 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-
+	fmt.Println("+++++++++++++")
 	if !rows.Next() { // проверяем нашли ли записи, если нет, то ошибка
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"record not found\"}"))
