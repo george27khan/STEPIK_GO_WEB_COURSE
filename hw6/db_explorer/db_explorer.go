@@ -33,7 +33,7 @@ type colDescr struct {
 
 type tableInfo struct {
 	Cols  []colDescr
-	PKCol string
+	PKCol string // работает только для single pk
 }
 
 type DBexplorer struct {
@@ -77,6 +77,9 @@ func NewExplorer(db *sql.DB) *DBexplorer {
 				return nil
 			}
 			colInfoMap[tableName].Cols = append(colInfoMap[tableName].Cols, col)
+			if col.Key.String == "PRI" {
+				colInfoMap[tableName].PKCol = col.Field.String // запоминает поле PK
+			}
 		}
 		cols.Close()
 	}
@@ -103,20 +106,24 @@ func NewDbExplorer(db *sql.DB) (*http.ServeMux, error) {
 func (exp *DBexplorer) tableHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		exp.getRows(w, r)
-	} else if r.Method == http.MethodPut {
-
+	} else {
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }
 
 func (exp *DBexplorer) getRows(w http.ResponseWriter, r *http.Request) {
+	const (
+		limitDef  = 5
+		offsetDef = 0
+	)
 	var (
 		limit, offset       int
 		limitStr, offsetStr string
 		tableName           string
 		colNameSlice        []string
-		colsDescr []colDescr
+		colsDescr           []colDescr
 		ok                  bool
-		info  map[string]*tableInfo
+		info                *tableInfo
 	)
 	tableName, _ = strings.CutPrefix(r.URL.Path, "/")
 
@@ -125,26 +132,25 @@ func (exp *DBexplorer) getRows(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
 	} else {
-		colsDescr = info.
+		colsDescr = info.Cols
 	}
 
 	if limitStr = r.URL.Query().Get("limit"); limitStr == "" {
-		limit = 5
+		limit = limitDef
 	} else {
+		// по тестам если пришло не число, заменяем дефолт значением
 		if val, err := strconv.Atoi(limitStr); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
-			return
+			limit = limitDef
 		} else {
 			limit = val
 		}
 	}
 	if offsetStr = r.URL.Query().Get("offset"); offsetStr == "" {
-		offset = 0
+		offset = offsetDef
 	} else {
+		// по тестам если пришло не число, заменяем дефолт значением
 		if val, err := strconv.Atoi(offsetStr); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
+			offset = offsetDef
 		} else {
 			offset = val
 		}
@@ -158,8 +164,8 @@ func (exp *DBexplorer) getRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	attrs := make([]interface{}, len(colsInfo))
-	attrsPntr := make([]interface{}, len(colsInfo))
+	attrs := make([]interface{}, len(colsDescr))
+	attrsPntr := make([]interface{}, len(colsDescr))
 	for i, _ := range attrsPntr {
 		attrsPntr[i] = &attrs[i]
 	}
@@ -201,23 +207,26 @@ func (exp *DBexplorer) tableRowHandler(w http.ResponseWriter, r *http.Request) {
 		exp.postRow(w, r)
 	} else if r.Method == http.MethodDelete {
 		exp.deleteRow(w, r)
+	} else {
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }
 
 func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
 	var (
-		tableName string
-		//colNameSlice []string
-		colsInfo    []colInfo
-		ok          bool
-		incomRow    map[string]interface{}
-		attrsInsert []interface{}
+		tableName, colNamePK string
+		colsDescr            []colDescr
+		incomRow             map[string]interface{}
+		attrsInsert          []interface{}
 	)
 	tableName = strings.Split(r.URL.Path, "/")[1]
-	if colsInfo, ok = exp.TabsInfo[tableName]; !ok {
+	if info, ok := exp.TabsInfo[tableName]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
+	} else {
+		colsDescr = info.Cols
+		colNamePK = info.PKCol
 	}
 
 	body, err := io.ReadAll(r.Body)
@@ -234,14 +243,15 @@ func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
 	insertCols := strings.Builder{}
 	insertVals := strings.Builder{}
 	attrsInsert = make([]interface{}, 0, len(incomRow))
-	for _, attr := range colsInfo {
+	for _, attr := range colsDescr {
 		//проверяем наличие атрибута
 		if val, ok := incomRow[attr.Field.String]; !ok {
-			//если атрибута нету и он в базе определен как not null и не определено дефолт значение, то завершаем работу
+			//если атрибута нету и он в базе определен как not null и не определено дефолт значение, то подменяем пустой строкой
 			if attr.Null.String == "NO" && attr.DefaultValue.String == "" {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte("{\"error\": \"empty param value\"}"))
-				return
+				insertCols.WriteString(attr.Field.String)
+				insertCols.WriteString(",")
+				insertVals.WriteString("?,")
+				attrsInsert = append(attrsInsert, "")
 			}
 		} else if attr.Extra.String != "auto_increment" {
 			// добавляем атрибут в запрос только если не автоинкремент
@@ -268,18 +278,17 @@ func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf("{\"response\": {\"id\": %v}}", id)))
+		w.Write([]byte(fmt.Sprintf("{\"response\": {\"%s\": %v}}", colNamePK, id)))
 		return
 	}
 }
 
 func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 	var (
-		tableName string
-		tabInfo   []colInfo
-		ok        bool
-		id        int
-		err       error
+		tableName, colNamePK string
+		colsDescr            []colDescr
+		id                   int
+		err                  error
 	)
 	pathParts := strings.Split(r.URL.Path, "/")
 	tableName = pathParts[1]
@@ -289,10 +298,13 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("{\"error\": \"record not found\"}"))
 		return
 	}
-	if tabInfo, ok = exp.TabsInfo[tableName]; !ok {
+	if info, ok := exp.TabsInfo[tableName]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
+	} else {
+		colsDescr = info.Cols
+		colNamePK = info.PKCol
 	}
 
 	body, err := io.ReadAll(r.Body)
@@ -313,7 +325,7 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 	//формируем куски запроса
 	for attr, val := range incomUpdAttr {
 		//проверка пришедших атрибутов и их значений
-		for _, info := range tabInfo {
+		for _, info := range colsDescr {
 			if info.Field.String == attr {
 				// поиск среди полей на обновление PRIMARY KEY
 				if info.Key.String == "PRI" {
@@ -328,7 +340,7 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				//проверка на типы пришедшего значения для поля, не все типы учтены...
-				switch val.(type) {
+				switch t := val.(type) {
 				case float64:
 					if !strings.Contains(info.TypeName.String, "int") &&
 						!strings.Contains(info.TypeName.String, "float") &&
@@ -344,7 +356,7 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				default:
-					fmt.Println("default")
+					fmt.Println("default", t, val)
 				}
 			}
 		}
@@ -353,9 +365,10 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 		valsUpdate = append(valsUpdate, val)
 	}
 	valsUpdate = append(valsUpdate, id)
-	result, err := exp.DB.Exec(fmt.Sprintf("update %s set %s where id = ?",
+	result, err := exp.DB.Exec(fmt.Sprintf("update %s set %s where %s = ?",
 		tableName,
-		strings.TrimRight(updateCols.String(), ",")),
+		strings.TrimRight(updateCols.String(), ","),
+		colNamePK),
 		valsUpdate...)
 
 	if err != nil {
@@ -376,7 +389,7 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parseURL(url string, tabInfo map[string][]colInfo) (tableName string, id int, err error) {
+func parseURL(url string, tabInfo map[string]*tableInfo) (tableName string, id int, err error) {
 	pathParts := strings.Split(url, "/")
 	tableName = pathParts[1]
 	//получаем id записи из запроса
@@ -422,12 +435,13 @@ func (exp *DBexplorer) deleteRow(w http.ResponseWriter, r *http.Request) {
 
 func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 	var (
-		colNameSlice []string
-		colsInfo     []colInfo
-		id           int
-		tableName    string
-		err          error
-		ok           bool
+		colNameSlice         []string
+		colsDescr            []colDescr
+		id                   int
+		tableName, colNamePK string
+		err                  error
+		ok                   bool
+		info                 *tableInfo
 	)
 	pathParts := strings.Split(r.URL.Path, "/")
 	tableName = pathParts[1]
@@ -438,27 +452,30 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if colsInfo, ok = exp.TabsInfo[tableName]; !ok {
+	if info, ok = exp.TabsInfo[tableName]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"unknown table\"}"))
 		return
+	} else {
+		colsDescr = info.Cols
+		colNamePK = info.PKCol
+		fmt.Println(tableName, colNamePK)
 	}
 
-	rows, err := exp.DB.Query(fmt.Sprintf("select * from %s where id = ?", tableName), id)
+	rows, err := exp.DB.Query(fmt.Sprintf("select * from %s where %s = ?", tableName, colNamePK), id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 		return
 	}
 	defer rows.Close()
-	fmt.Println("+++++++++++++")
 	if !rows.Next() { // проверяем нашли ли записи, если нет, то ошибка
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("{\"error\": \"record not found\"}"))
 		return
 	} else {
-		attrs := make([]interface{}, len(colsInfo))
-		attrsPntr := make([]interface{}, len(colsInfo))
+		attrs := make([]interface{}, len(colsDescr))
+		attrsPntr := make([]interface{}, len(colsDescr))
 		for i, _ := range attrsPntr {
 			attrsPntr[i] = &attrs[i]
 		}
