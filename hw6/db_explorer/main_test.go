@@ -1,19 +1,17 @@
 package main
 
 import (
-	"database/sql"
-	"fmt"
-	"reflect"
-	"testing"
-
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	_ "github.com/go-sql-driver/mysql"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"testing"
 	"time"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
 // CaseResponse

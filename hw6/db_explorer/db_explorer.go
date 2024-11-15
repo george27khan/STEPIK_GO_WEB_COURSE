@@ -19,6 +19,7 @@ import (
 // CaseResponse
 type respMap map[string]interface{}
 
+// структура хранящая описание полей таблицы из  SHOW FULL COLUMNS FROM `$table_name`
 type colDescr struct {
 	Field        sql.NullString
 	TypeName     sql.NullString
@@ -31,17 +32,19 @@ type colDescr struct {
 	Comment      sql.NullString
 }
 
+// структура хранения информации о таблице
 type tableInfo struct {
 	Cols  []colDescr
-	PKCol string // работает только для single pk
+	PKCol string // Назание поля ключа, работает только для single pk
 }
 
+// структура хранения информации о таблицах и коннект к базе
 type DBexplorer struct {
 	TabsInfo map[string]*tableInfo
 	DB       *sql.DB
 }
 
-// считывание списка таблиц отдельной функцией, для устранения проблемы открытия второго соединения
+// initTables считывание списка таблиц отдельной функцией, для устранения проблемы открытия второго соединения
 func initTables(db *sql.DB) (tables []string) {
 	var tableName string
 	rows, err := db.Query("SHOW TABLES")
@@ -59,7 +62,7 @@ func initTables(db *sql.DB) (tables []string) {
 	return
 }
 
-// Создаем "конструктор" для Person с зачитыванием информации о таблицах
+// NewExplorer Создаем "конструктор" для Person с зачитыванием информации о таблицах
 func NewExplorer(db *sql.DB) *DBexplorer {
 	var col colDescr
 	colInfoMap := make(map[string]*tableInfo)
@@ -89,12 +92,11 @@ func NewExplorer(db *sql.DB) *DBexplorer {
 	}
 }
 
-// точка входа
+// NewDbExplorer точка входа
 func NewDbExplorer(db *sql.DB) (*http.ServeMux, error) {
 	explorer := NewExplorer(db) // при инициализации регистрируем все таблицы в сущность
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", explorer.rootHandler)
-
 	//зарегистрируем роуты для всех таблиц
 	for tableName, _ := range explorer.TabsInfo {
 		mux.HandleFunc(fmt.Sprintf("/%s", tableName), explorer.tableHandler)
@@ -122,17 +124,13 @@ func (exp *DBexplorer) getRows(w http.ResponseWriter, r *http.Request) {
 		tableName           string
 		colNameSlice        []string
 		colsDescr           []colDescr
-		ok                  bool
-		info                *tableInfo
+		err                 error
 	)
-	tableName, _ = strings.CutPrefix(r.URL.Path, "/")
-
-	if info, ok = exp.TabsInfo[tableName]; !ok {
+	//разбираем URL
+	tableName, _, colsDescr, _, err = parseURL(r.URL.Path, exp.TabsInfo)
+	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"unknown table\"}"))
-		return
-	} else {
-		colsDescr = info.Cols
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 	}
 
 	if limitStr = r.URL.Query().Get("limit"); limitStr == "" {
@@ -218,15 +216,13 @@ func (exp *DBexplorer) putRow(w http.ResponseWriter, r *http.Request) {
 		colsDescr            []colDescr
 		incomRow             map[string]interface{}
 		attrsInsert          []interface{}
+		err                  error
 	)
-	tableName = strings.Split(r.URL.Path, "/")[1]
-	if info, ok := exp.TabsInfo[tableName]; !ok {
+	//разбираем URL
+	tableName, _, colsDescr, colNamePK, err = parseURL(r.URL.Path, exp.TabsInfo)
+	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"unknown table\"}"))
-		return
-	} else {
-		colsDescr = info.Cols
-		colNamePK = info.PKCol
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 	}
 
 	body, err := io.ReadAll(r.Body)
@@ -290,21 +286,11 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 		id                   int
 		err                  error
 	)
-	pathParts := strings.Split(r.URL.Path, "/")
-	tableName = pathParts[1]
-	//получаем id записи из запроса
-	if id, err = strconv.Atoi(pathParts[2]); err != nil {
+	//разбираем URL
+	tableName, id, colsDescr, colNamePK, err = parseURL(r.URL.Path, exp.TabsInfo)
+	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"record not found\"}"))
-		return
-	}
-	if info, ok := exp.TabsInfo[tableName]; !ok {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"unknown table\"}"))
-		return
-	} else {
-		colsDescr = info.Cols
-		colNamePK = info.PKCol
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 	}
 
 	body, err := io.ReadAll(r.Body)
@@ -372,7 +358,6 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 		valsUpdate...)
 
 	if err != nil {
-		fmt.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 		return
@@ -389,17 +374,22 @@ func (exp *DBexplorer) postRow(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parseURL(url string, tabInfo map[string]*tableInfo) (tableName string, id int, err error) {
+func parseURL(url string, tabInfo map[string]*tableInfo) (tableName string, id int, colsDescr []colDescr, colNamePK string, err error) {
 	pathParts := strings.Split(url, "/")
 	tableName = pathParts[1]
-	//получаем id записи из запроса
-	if id, err = strconv.Atoi(pathParts[2]); err != nil {
-		return "", 0, err
+	//получаем id записи из запроса если его передавали в пути
+	if len(pathParts) > 2 && pathParts[2] != "" {
+		if id, err = strconv.Atoi(pathParts[2]); err != nil {
+			return "", 0, nil, "", err
+		}
 	}
-	if _, ok := tabInfo[tableName]; !ok {
-		return "", 0, errors.New("table not found")
+	if info, ok := tabInfo[tableName]; !ok {
+		return "", 0, nil, "", errors.New("table not found")
+	} else {
+		colsDescr = info.Cols
+		colNamePK = info.PKCol
 	}
-	return tableName, id, nil
+	return tableName, id, colsDescr, colNamePK, nil
 }
 
 func (exp *DBexplorer) deleteRow(w http.ResponseWriter, r *http.Request) {
@@ -409,14 +399,13 @@ func (exp *DBexplorer) deleteRow(w http.ResponseWriter, r *http.Request) {
 		err       error
 	)
 	//разбираем URL
-	tableName, id, err = parseURL(r.URL.Path, exp.TabsInfo)
+	tableName, id, _, _, err = parseURL(r.URL.Path, exp.TabsInfo)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 	}
 	result, err := exp.DB.Exec(fmt.Sprintf("delete from %s where id = ?", tableName), id)
 	if err != nil {
-		fmt.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 		return
@@ -440,26 +429,12 @@ func (exp *DBexplorer) getRow(w http.ResponseWriter, r *http.Request) {
 		id                   int
 		tableName, colNamePK string
 		err                  error
-		ok                   bool
-		info                 *tableInfo
 	)
-	pathParts := strings.Split(r.URL.Path, "/")
-	tableName = pathParts[1]
-	//получаем id записи из запроса
-	if id, err = strconv.Atoi(pathParts[2]); err != nil {
+	//разбираем URL
+	tableName, id, colsDescr, colNamePK, err = parseURL(r.URL.Path, exp.TabsInfo)
+	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"record not found\"}"))
-		return
-	}
-
-	if info, ok = exp.TabsInfo[tableName]; !ok {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("{\"error\": \"unknown table\"}"))
-		return
-	} else {
-		colsDescr = info.Cols
-		colNamePK = info.PKCol
-		fmt.Println(tableName, colNamePK)
+		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 	}
 
 	rows, err := exp.DB.Query(fmt.Sprintf("select * from %s where %s = ?", tableName, colNamePK), id)
