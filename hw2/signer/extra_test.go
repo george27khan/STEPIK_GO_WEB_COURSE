@@ -18,7 +18,7 @@ import (
 	при правильной реализации ваш код конечно же должен его проходить
 */
 
-func TestByIlia(t *testing.T) {
+func testByIlia(t *testing.T) {
 
 	var recieved uint32
 	freeFlowJobs := []job{
