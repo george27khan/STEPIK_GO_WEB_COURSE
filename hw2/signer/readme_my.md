@@ -4,9 +4,6 @@ go test -v -race
 ```
 нужно скачать архив MinGW-w64 for Windows с https://winlibs.com/
 
-Убедитесь, что выбраны компоненты для компиляции, такие как:
-mingw32-gcc-g++ (для компиляции C++ и поддержки CGO в Go).
-
 Настройте переменные окружения `C:\mingw64\bin`
 
 Проверьте установку в cmd `gcc --version`
@@ -16,7 +13,6 @@ mingw32-gcc-g++ (для компиляции C++ и поддержки CGO в Go
 cmd
 ```
 set CGO_ENABLED=1
-set CC=gcc
 ```
 
 Перезагрузить IDE
