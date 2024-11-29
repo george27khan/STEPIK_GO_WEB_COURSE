@@ -36,7 +36,7 @@ message Nothing {
 }
 
 service Admin {
-    rpc Logging (Nothing) returns (stream Event) {}
+    rpc Logging (Nothing) returns ( Event) {}
     rpc Statistics (StatInterval) returns (stream Stat) {}
 }
 
