@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"log"
 	"reflect"
@@ -40,9 +41,9 @@ func wait(amout int) {
 
 // утилитарная функция для коннекта к серверу
 func getGrpcConn(t *testing.T) *grpc.ClientConn {
-	grcpConn, err := grpc.Dial(
+	grcpConn, err := grpc.NewClient(
 		listenAddr,
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
 		t.Fatalf("cant connect to grpc: %v", err)

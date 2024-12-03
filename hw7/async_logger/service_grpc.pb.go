@@ -12,7 +12,7 @@
 // полученный при генерации код (service.pb.go и service_grpc.pb.go) при загрузки в автогрейдер надо будет положить в service.go
 // на время локальной разработки можно ничего не делать
 
-package __
+package main
 
 import (
 	context "context"
@@ -35,7 +35,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AdminClient interface {
-	Logging(ctx context.Context, in *Nothing, opts ...grpc.CallOption) (*Event, error)
+	Logging(ctx context.Context, in *Nothing, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
 	Statistics(ctx context.Context, in *StatInterval, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Stat], error)
 }
 
@@ -47,19 +47,28 @@ func NewAdminClient(cc grpc.ClientConnInterface) AdminClient {
 	return &adminClient{cc}
 }
 
-func (c *adminClient) Logging(ctx context.Context, in *Nothing, opts ...grpc.CallOption) (*Event, error) {
+func (c *adminClient) Logging(ctx context.Context, in *Nothing, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Event)
-	err := c.cc.Invoke(ctx, Admin_Logging_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Admin_ServiceDesc.Streams[0], Admin_Logging_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[Nothing, Event]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Admin_LoggingClient = grpc.ServerStreamingClient[Event]
 
 func (c *adminClient) Statistics(ctx context.Context, in *StatInterval, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Stat], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Admin_ServiceDesc.Streams[0], Admin_Statistics_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Admin_ServiceDesc.Streams[1], Admin_Statistics_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +89,7 @@ type Admin_StatisticsClient = grpc.ServerStreamingClient[Stat]
 // All implementations must embed UnimplementedAdminServer
 // for forward compatibility.
 type AdminServer interface {
-	Logging(context.Context, *Nothing) (*Event, error)
+	Logging(*Nothing, grpc.ServerStreamingServer[Event]) error
 	Statistics(*StatInterval, grpc.ServerStreamingServer[Stat]) error
 	mustEmbedUnimplementedAdminServer()
 }
@@ -92,8 +101,8 @@ type AdminServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAdminServer struct{}
 
-func (UnimplementedAdminServer) Logging(context.Context, *Nothing) (*Event, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Logging not implemented")
+func (UnimplementedAdminServer) Logging(*Nothing, grpc.ServerStreamingServer[Event]) error {
+	return status.Errorf(codes.Unimplemented, "method Logging not implemented")
 }
 func (UnimplementedAdminServer) Statistics(*StatInterval, grpc.ServerStreamingServer[Stat]) error {
 	return status.Errorf(codes.Unimplemented, "method Statistics not implemented")
@@ -119,23 +128,16 @@ func RegisterAdminServer(s grpc.ServiceRegistrar, srv AdminServer) {
 	s.RegisterService(&Admin_ServiceDesc, srv)
 }
 
-func _Admin_Logging_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Nothing)
-	if err := dec(in); err != nil {
-		return nil, err
+func _Admin_Logging_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(Nothing)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(AdminServer).Logging(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Admin_Logging_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AdminServer).Logging(ctx, req.(*Nothing))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(AdminServer).Logging(m, &grpc.GenericServerStream[Nothing, Event]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Admin_LoggingServer = grpc.ServerStreamingServer[Event]
 
 func _Admin_Statistics_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StatInterval)
@@ -154,13 +156,13 @@ type Admin_StatisticsServer = grpc.ServerStreamingServer[Stat]
 var Admin_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "main.Admin",
 	HandlerType: (*AdminServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "Logging",
-			Handler:    _Admin_Logging_Handler,
-		},
-	},
+	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Logging",
+			Handler:       _Admin_Logging_Handler,
+			ServerStreams: true,
+		},
 		{
 			StreamName:    "Statistics",
 			Handler:       _Admin_Statistics_Handler,

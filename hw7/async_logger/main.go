@@ -1,5 +1,5 @@
 package main
 
-func main() {
+func main1() {
 	println("usage: make test")
 }
