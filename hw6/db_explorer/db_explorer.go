@@ -129,6 +129,7 @@ func (exp *DBexplorer) getRows(w http.ResponseWriter, r *http.Request) {
 	//разбираем URL
 	tableName, _, colsDescr, _, err = parseURL(r.URL.Path, exp.TabsInfo)
 	if err != nil {
+
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(fmt.Sprintf("{\"error\": \"%s\"}", err.Error())))
 	}
