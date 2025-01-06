@@ -4,44 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/runtime/protoimpl"
-	"strings"
-	"time"
-	//"golang.org/x/text/message/pipeline"
-	"google.golang.org/grpc"
 	"log"
 	"net"
+	"strings"
 	"sync"
+	"time"
 )
 
 // тут вы пишете код
 
-type Service struct {
-	AdminService
-	BizService
-}
-
 // обращаю ваше внимание - в этом задании запрещены глобальные переменные
+
 type AdminService struct {
-	muStatByMethod   sync.Mutex
-	muStatByConsumer sync.Mutex
-	muLogger         sync.Mutex
-	muStat           sync.Mutex
-	sessions         string
-	pipeEvent        chan Event // канал совместный с сервисом biz для обмена сообщениями
-	pipeStat         chan Event // канал совместный с сервисом biz для обмена сообщениями
-	host             string
-	aclMap           map[string][]string
-	subsEvent        map[grpc.ServerStreamingServer[Event]]struct{} //стримы подписанные для отправки событий
-	subsStat         map[grpc.ServerStreamingServer[Stat]]struct{}  //стримы подписанные для отправки статистики
-	stat             map[grpc.ServerStreamingServer[Stat]]Stat      // хранилище статистики
-	timer            time.Time
-	onceCalcStat     sync.Once
-	onceSendStat     sync.Once
+	muLogger     sync.Mutex
+	muStat       sync.Mutex
+	pipeEvent    chan Event // канал совместный с сервисом biz для передачи событий
+	pipeStat     chan Event // канал совместный с сервисом biz для передачи статистики
+	host         string
+	aclMap       map[string][]string
+	subsEvent    map[grpc.ServerStreamingServer[Event]]struct{} //стримы подписанные для отправки событий
+	stat         sync.Map                                       // хранилище статистики
+	onceCalcStat sync.Once                                      //разовый запуск горутины расчета статистики
 }
 
 // getCtxVal получаем значение по ключу из контекста grpc
@@ -74,24 +63,18 @@ func getRemoteAddr(ctx context.Context) string {
 // NewAdminService конструктор для структуры AdminService
 func NewAdminService(pipeEvent chan Event, pipeStat chan Event, host string, ACLMap map[string][]string) *AdminService {
 	subsEvent := make(map[grpc.ServerStreamingServer[Event]]struct{})
-	subsStat := make(map[grpc.ServerStreamingServer[Stat]]struct{})
-	stat := make(map[grpc.ServerStreamingServer[Stat]]Stat)
+
 	return &AdminService{
 		sync.Mutex{},
 		sync.Mutex{},
-		sync.Mutex{},
-		sync.Mutex{},
-		"",
 		pipeEvent,
 		pipeStat,
 		host,
 		ACLMap,
 		subsEvent,
-		subsStat,
-		stat,
-		time.Now(),
+		sync.Map{},
 		sync.Once{},
-		sync.Once{}}
+	}
 }
 
 // Logging подписывает пользователя на получение логов, стримит вызовы
@@ -134,34 +117,33 @@ func (a *AdminService) Logging(n *Nothing, str grpc.ServerStreamingServer[Event]
 // updateStat обновляет статистику по совершенному вызову
 func (a *AdminService) updateStat(mes Event) {
 	wg := &sync.WaitGroup{}
-	for str, stat := range a.stat {
+	a.stat.Range(func(key, value interface{}) bool {
+		str := key.(grpc.ServerStreamingServer[Stat])
+		stat := value.(Stat)
 		if mes.Consumer == getCtxVal(str.Context(), "consumer") && strings.HasSuffix(mes.Method, "/Statistics") {
-			continue
+			return true // Это аналог continue
 		}
-		fmt.Println("updateStat start", mes.Method, str, a.stat)
+		//fmt.Println("updateStat start", mes.Method, str, a.stat)
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			a.muStatByMethod.Lock()
+			a.muStat.Lock()
 			if val, ok := stat.ByMethod[mes.Method]; ok {
-				a.stat[str].ByMethod[mes.Method] = val + 1
+				stat.ByMethod[mes.Method] = val + 1
 			} else {
-				a.stat[str].ByMethod[mes.Method] = 1
+				stat.ByMethod[mes.Method] = 1
 			}
-			a.muStatByMethod.Unlock()
-		}()
-		go func() {
-			defer wg.Done()
-			a.muStatByConsumer.Lock()
 			if val, ok := stat.ByConsumer[mes.Consumer]; ok {
-				a.stat[str].ByConsumer[mes.Consumer] = val + 1
+				stat.ByConsumer[mes.Consumer] = val + 1
 			} else {
-				a.stat[str].ByConsumer[mes.Consumer] = 1
+				stat.ByConsumer[mes.Consumer] = 1
 			}
-			a.muStatByConsumer.Unlock()
+			a.stat.Store(key, stat) // перезаписываем обновленное значение
+			a.muStat.Unlock()
 		}()
 		fmt.Println("updateStat end", mes.Method, str, a.stat)
-	}
+		return true
+	})
 	wg.Wait()
 }
 
@@ -171,36 +153,17 @@ func (a *AdminService) sendStat(si *StatInterval, str grpc.ServerStreamingServer
 	for {
 		select {
 		case <-tik.C:
-			a.muStatByConsumer.Lock()
-			a.muStatByMethod.Lock()
-			fmt.Println("Отправка статистики", str, a.stat[str])
-			fmt.Println(getCtxVal(str.Context(), "consumer"), time.Since(a.timer))
-			statRes := a.stat[str]
-			fmt.Println(str, statRes)
+			//fmt.Println("Отправка статистики", str, a.stat[str])
+			stat, _ := a.stat.Load(str)
+			statRes := stat.(Stat)
+			fmt.Println("Отправка статистики", str, statRes)
 			str.Send(&statRes)
 			//сбрасываем статистику
-			fmt.Println("Сброс статистики", str, a.stat[str])
-			stat := Stat{}
-			stat.ByConsumer = make(map[string]uint64)
-			stat.ByMethod = make(map[string]uint64)
-			a.stat[str] = stat
-			a.muStatByConsumer.Unlock()
-			a.muStatByMethod.Unlock()
-			//for sub, _ := range a.subsStat {
-			//	// отправляем статистику во все стримы\
-			//	//fmt.Println(subs, subs, val.Consumer, consumer, val.Method, method)
-			//	statRes := a.stat[sub]
-			//	sub.Send(&statRes)
-			//
-			//	//сбрасываем статистику
-			//	fmt.Println("Сброс статистики ", a.stat)
-			//	stat := Stat{}
-			//	stat.ByConsumer = make(map[string]uint64)
-			//	stat.ByMethod = make(map[string]uint64)
-			//	a.stat[sub] = stat
-			//}
-			//default:
-			//	fmt.Printf("WAIT %v", str)
+			fmt.Println("Сброс статистики", str, statRes)
+			statNew := Stat{}
+			statNew.ByConsumer = make(map[string]uint64)
+			statNew.ByMethod = make(map[string]uint64)
+			a.stat.Store(str, statNew)
 		}
 	}
 }
@@ -210,15 +173,12 @@ func (a *AdminService) Statistics(si *StatInterval, str grpc.ServerStreamingServ
 	if !checkConsumer(str.Context(), a.aclMap) {
 		return status.Error(codes.Unauthenticated, "access denied")
 	}
-	a.muStatByConsumer.Lock()
-	// добавляем стрим в мапу, если он новый
-	if _, ok := a.stat[str]; !ok {
-		stat := Stat{}
-		stat.ByMethod = make(map[string]uint64)
-		stat.ByConsumer = make(map[string]uint64)
-		a.stat[str] = stat
-	}
-	a.muStatByConsumer.Unlock()
+	// добавляем стрим в мапу
+	stat := Stat{}
+	stat.ByMethod = make(map[string]uint64)
+	stat.ByConsumer = make(map[string]uint64)
+	a.stat.Store(str, stat)
+
 	consumer := getCtxVal(str.Context(), "consumer")
 	method := getMethod(str.Context())
 	// фиксируем текущий вызов
@@ -250,7 +210,6 @@ func (a *AdminService) mustEmbedUnimplementedAdminServer() {
 
 type BizService struct {
 	mu        sync.RWMutex
-	sessions  string
 	pipeEvent chan Event // канал отправкии сообщений о вызовах
 	pipeStat  chan Event // канал отправкии сообщений о статистике
 	host      string
@@ -258,7 +217,7 @@ type BizService struct {
 }
 
 func NewBizService(pipeEvent chan Event, pipeStat chan Event, host string, ACLMap map[string][]string) *BizService {
-	return &BizService{sync.RWMutex{}, "", pipeEvent, pipeStat, host, ACLMap}
+	return &BizService{sync.RWMutex{}, pipeEvent, pipeStat, host, ACLMap}
 }
 
 func checkConsumer(ctx context.Context, ACLMap map[string][]string) bool {
@@ -347,6 +306,7 @@ func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string)
 	}
 	//fmt.Println(err, ACLMap)
 	go runGRPCServer(ctx, listenAddr, ACLMap)
+
 	return nil
 }
 
