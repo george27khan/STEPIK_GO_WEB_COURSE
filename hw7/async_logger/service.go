@@ -17,20 +17,20 @@ import (
 	"time"
 )
 
-// тут вы пишете код
+// Тут вы пишете код
 
-// обращаю ваше внимание - в этом задании запрещены глобальные переменные
+// Обращаю ваше внимание - в этом задании запрещены глобальные переменные
 
 type AdminService struct {
 	muLogger     sync.Mutex
 	muStat       sync.Mutex
-	pipeEvent    chan Event // канал совместный с сервисом biz для передачи событий
-	pipeStat     chan Event // канал совместный с сервисом biz для передачи статистики
+	pipeEvent    chan *Event // Канал совместный с сервисом biz для передачи событий
+	pipeStat     chan *Event // Канал совместный с сервисом biz для передачи статистики
 	host         string
 	aclMap       map[string][]string
-	subsEvent    map[grpc.ServerStreamingServer[Event]]struct{} //стримы подписанные для отправки событий
-	stat         sync.Map                                       // хранилище статистики
-	onceCalcStat sync.Once                                      //разовый запуск горутины расчета статистики
+	subsEvent    map[grpc.ServerStreamingServer[Event]]struct{} // Стримы подписанные для отправки событий
+	stat         sync.Map                                       // Хранилище статистики
+	onceCalcStat sync.Once                                      // Разовый запуск горутины расчета статистики
 }
 
 // getCtxVal получаем значение по ключу из контекста grpc
@@ -61,7 +61,7 @@ func getRemoteAddr(ctx context.Context) string {
 }
 
 // NewAdminService конструктор для структуры AdminService
-func NewAdminService(pipeEvent chan Event, pipeStat chan Event, host string, ACLMap map[string][]string) *AdminService {
+func NewAdminService(pipeEvent chan *Event, pipeStat chan *Event, host string, ACLMap map[string][]string) *AdminService {
 	subsEvent := make(map[grpc.ServerStreamingServer[Event]]struct{})
 
 	return &AdminService{
@@ -90,7 +90,7 @@ func (a *AdminService) Logging(n *Nothing, str grpc.ServerStreamingServer[Event]
 		a.subsEvent[str] = struct{}{}
 	}
 	a.muLogger.Unlock()
-	a.pipeEvent <- Event{protoimpl.MessageState{},
+	a.pipeEvent <- &Event{protoimpl.MessageState{},
 		0, protoimpl.UnknownFields{},
 		time.Now().Unix(),
 		consumer,
@@ -100,14 +100,14 @@ func (a *AdminService) Logging(n *Nothing, str grpc.ServerStreamingServer[Event]
 	for val := range a.pipeEvent {
 		// отправляем событие во все стримы
 		a.muLogger.Lock()
-		for subs, _ := range a.subsEvent {
+		for subs := range a.subsEvent {
 			// остановка отправки сообщения о логировании своего подписчика себе
 			if getCtxVal(subs.Context(), "consumer") == val.Consumer && val.Method == "/main.Admin/Logging" {
 				continue
 			}
 			//go a.updateStat(val.Consumer, val.Method) // запуск обновления статистики
-			fmt.Println(subs, subs, val.Consumer, consumer, val.Method, method)
-			subs.Send(&val)
+			//fmt.Println(subs, subs, val.Consumer, consumer, val.Method, method)
+			subs.Send(val)
 		}
 		a.muLogger.Unlock()
 	}
@@ -115,11 +115,11 @@ func (a *AdminService) Logging(n *Nothing, str grpc.ServerStreamingServer[Event]
 }
 
 // updateStat обновляет статистику по совершенному вызову
-func (a *AdminService) updateStat(mes Event) {
+func (a *AdminService) updateStat(mes *Event) {
 	wg := &sync.WaitGroup{}
 	a.stat.Range(func(key, value interface{}) bool {
 		str := key.(grpc.ServerStreamingServer[Stat])
-		stat := value.(Stat)
+		stat := value.(*Stat)
 		if mes.Consumer == getCtxVal(str.Context(), "consumer") && strings.HasSuffix(mes.Method, "/Statistics") {
 			return true // Это аналог continue
 		}
@@ -141,7 +141,7 @@ func (a *AdminService) updateStat(mes Event) {
 			a.stat.Store(key, stat) // перезаписываем обновленное значение
 			a.muStat.Unlock()
 		}()
-		fmt.Println("updateStat end", mes.Method, str, a.stat)
+		//fmt.Println("updateStat end", mes.Method, str, a.stat)
 		return true
 	})
 	wg.Wait()
@@ -155,15 +155,15 @@ func (a *AdminService) sendStat(si *StatInterval, str grpc.ServerStreamingServer
 		case <-tik.C:
 			//fmt.Println("Отправка статистики", str, a.stat[str])
 			stat, _ := a.stat.Load(str)
-			statRes := stat.(Stat)
+			statRes := stat.(*Stat)
 			fmt.Println("Отправка статистики", str, statRes)
-			str.Send(&statRes)
+			str.Send(statRes)
 			//сбрасываем статистику
 			fmt.Println("Сброс статистики", str, statRes)
 			statNew := Stat{}
 			statNew.ByConsumer = make(map[string]uint64)
 			statNew.ByMethod = make(map[string]uint64)
-			a.stat.Store(str, statNew)
+			a.stat.Store(str, &statNew)
 		}
 	}
 }
@@ -177,12 +177,12 @@ func (a *AdminService) Statistics(si *StatInterval, str grpc.ServerStreamingServ
 	stat := Stat{}
 	stat.ByMethod = make(map[string]uint64)
 	stat.ByConsumer = make(map[string]uint64)
-	a.stat.Store(str, stat)
+	a.stat.Store(str, &stat)
 
 	consumer := getCtxVal(str.Context(), "consumer")
 	method := getMethod(str.Context())
 	// фиксируем текущий вызов
-	a.pipeStat <- Event{protoimpl.MessageState{},
+	a.pipeStat <- &Event{protoimpl.MessageState{},
 		0, protoimpl.UnknownFields{},
 		time.Now().Unix(),
 		consumer,
@@ -193,14 +193,9 @@ func (a *AdminService) Statistics(si *StatInterval, str grpc.ServerStreamingServ
 
 	a.onceCalcStat.Do(func() {
 		for val := range a.pipeStat {
-			//// отправляем событие во все стримы
-			//if val.Consumer == consumer && val.Method == "/main.Admin/Statistics" {
-			//	continue
-			//}
 			go a.updateStat(val) // запуск обновления статистики
 		}
 	})
-
 	return nil
 }
 
@@ -210,13 +205,13 @@ func (a *AdminService) mustEmbedUnimplementedAdminServer() {
 
 type BizService struct {
 	mu        sync.RWMutex
-	pipeEvent chan Event // канал отправкии сообщений о вызовах
-	pipeStat  chan Event // канал отправкии сообщений о статистике
+	pipeEvent chan *Event // Канал отправки сообщений о вызовах
+	pipeStat  chan *Event // Канал отправки сообщений о статистике
 	host      string
 	aclMap    map[string][]string
 }
 
-func NewBizService(pipeEvent chan Event, pipeStat chan Event, host string, ACLMap map[string][]string) *BizService {
+func NewBizService(pipeEvent chan *Event, pipeStat chan *Event, host string, ACLMap map[string][]string) *BizService {
 	return &BizService{sync.RWMutex{}, pipeEvent, pipeStat, host, ACLMap}
 }
 
@@ -249,35 +244,35 @@ func (b *BizService) Check(ctx context.Context, _ *Nothing) (*Nothing, error) {
 	if !checkConsumer(ctx, b.aclMap) {
 		return nil, status.Error(codes.Unauthenticated, "access denied")
 	}
-	b.pipeEvent <- Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
-	b.pipeStat <- Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
+	b.pipeEvent <- &Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
+	b.pipeStat <- &Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
 	return nil, nil
 }
 func (b *BizService) Add(ctx context.Context, _ *Nothing) (*Nothing, error) {
 	if !checkConsumer(ctx, b.aclMap) {
 		return nil, status.Error(codes.Unauthenticated, "access denied")
 	}
-	b.pipeEvent <- Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
-	b.pipeStat <- Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
+	b.pipeEvent <- &Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
+	b.pipeStat <- &Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
 	return nil, nil
 }
 func (b *BizService) Test(ctx context.Context, _ *Nothing) (*Nothing, error) {
 	if !checkConsumer(ctx, b.aclMap) {
 		return nil, status.Error(codes.Unauthenticated, "access denied")
 	}
-	b.pipeEvent <- Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
-	b.pipeStat <- Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
+	b.pipeEvent <- &Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
+	b.pipeStat <- &Event{protoimpl.MessageState{}, 0, protoimpl.UnknownFields{}, time.Now().Unix(), getCtxVal(ctx, "consumer"), getMethod(ctx), getRemoteAddr(ctx)}
 	return nil, nil
 }
 func (b *BizService) mustEmbedUnimplementedBizServer() {
 }
 
 func runGRPCServer(ctx context.Context, listenAddr string, ACLMap map[string][]string) {
-	pipeEvent := make(chan Event, 10)
-	pipeStat := make(chan Event, 10)
+	pipeEvent := make(chan *Event, 10)
+	pipeStat := make(chan *Event, 10)
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Fatalln("cant listen port addres", err)
+		log.Fatalln("cant listen port address", err)
 	}
 	defer lis.Close()
 
@@ -295,7 +290,6 @@ func runGRPCServer(ctx context.Context, listenAddr string, ACLMap map[string][]s
 			return
 		}
 	}
-
 }
 
 func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string) (err error) {
@@ -304,192 +298,6 @@ func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string)
 	if err != nil {
 		return
 	}
-	//fmt.Println(err, ACLMap)
 	go runGRPCServer(ctx, listenAddr, ACLMap)
-
 	return nil
-}
-
-//// чтобы не было сюрпризов когда где-то не успела преключиться горутина и не успело что-то стортовать
-//func wait(amout int) {
-//	time.Sleep(time.Duration(amout) * 10 * time.Millisecond)
-//}
-
-//// утилитарная функция для коннекта к серверу
-//func getGrpcConn() *grpc.ClientConn {
-//	listenAddr := "127.0.0.1:8082"
-//	grcpConn, err := grpc.NewClient(
-//		listenAddr,
-//		grpc.WithTransportCredentials(insecure.NewCredentials()),
-//	)
-//	if err != nil {
-//		fmt.Printf("cant connect to grpc: %v\n", err)
-//	}
-//	return grcpConn
-//}
-
-//// получаем контекст с нужнымы метаданными для ACL
-//func getConsumerCtx(consumerName string) context.Context {
-//	// ctx, _ := context.WithTimeout(context.Background(), time.Second)
-//	ctx := context.Background()
-//	md := metadata.Pairs(
-//		"consumer", consumerName,
-//	)
-//	return metadata.NewOutgoingContext(ctx, md)
-//}
-
-func main() {
-	//	ACLData := `{
-	//	"logger1":          ["/main.Admin/Logging"],
-	//	"logger2":          ["/main.Admin/Logging"],
-	//	"stat1":            ["/main.Admin/Statistics"],
-	//	"stat2":            ["/main.Admin/Statistics"],
-	//	"biz_user":         ["/main.Biz/Check", "/main.Biz/Add"],
-	//	"biz_admin":        ["/main.Biz/*"],
-	//	"after_disconnect": ["/main.Biz/Add"]
-	//}`
-	//	listenAddr := "127.0.0.1:8082"
-	//
-	//	ctx, finish := context.WithCancel(context.Background())
-	//	err := StartMyMicroservice(ctx, listenAddr, ACLData)
-	//	if err != nil {
-	//		fmt.Printf("cant start server initial: %v\n", err)
-	//	}
-	//	wait(1)
-	//	defer func() {
-	//		finish()
-	//		wait(1)
-	//	}()
-	//
-	//	conn := getGrpcConn()
-	//	defer conn.Close()
-	//
-	//	biz := NewBizClient(conn)
-	//	adm := NewAdminClient(conn)
-	//
-	//	statStream1, err := adm.Statistics(getConsumerCtx("stat1"), &StatInterval{IntervalSeconds: 2})
-	//	wait(1)
-	//	statStream2, err := adm.Statistics(getConsumerCtx("stat2"), &StatInterval{IntervalSeconds: 3})
-	//	statStream2 = statStream2
-	//	mu := &sync.Mutex{}
-	//	stat1 := &Stat{}
-	//	stat2 := &Stat{}
-	//	stat2 = stat2
-	//	wg := &sync.WaitGroup{}
-	//	fmt.Println("----------------------------------------------------")
-	//	wg.Add(2)
-	//	go func() {
-	//		for {
-	//			stat, err := statStream1.Recv()
-	//			if err != nil && err != io.EOF {
-	//				// fmt.Printf("unexpected error %v\n", err)
-	//				return
-	//			} else if err == io.EOF {
-	//				break
-	//			}
-	//			// log.Println("stat1", stat, err)
-	//			mu.Lock()
-	//			// это грязный хак
-	//			// protobuf добавляет к структуре свои поля, которвые не видны при приведении к строке и при reflect.DeepEqual
-	//			// поэтому берем не оригинал сообщения, а только нужные значения
-	//			stat1 = &Stat{
-	//				ByMethod:   stat.ByMethod,
-	//				ByConsumer: stat.ByConsumer,
-	//			}
-	//			mu.Unlock()
-	//		}
-	//	}()
-	//	go func() {
-	//		for {
-	//			stat, err := statStream2.Recv()
-	//			if err != nil && err != io.EOF {
-	//				// fmt.Printf("unexpected error %v\n", err)
-	//				return
-	//			} else if err == io.EOF {
-	//				break
-	//			}
-	//			// log.Println("stat2", stat, err)
-	//			mu.Lock()
-	//			// это грязный хак
-	//			// protobuf добавляет к структуре свои поля, которвые не видны при приведении к строке и при reflect.DeepEqual
-	//			// поэтому берем не оригинал сообщения, а только нужные значения
-	//			stat2 = &Stat{
-	//				ByMethod:   stat.ByMethod,
-	//				ByConsumer: stat.ByConsumer,
-	//			}
-	//			mu.Unlock()
-	//		}
-	//	}()
-	//
-	//	wait(1)
-	//
-	//	biz.Check(getConsumerCtx("biz_user"), &Nothing{})
-	//	biz.Add(getConsumerCtx("biz_user"), &Nothing{})
-	//	biz.Test(getConsumerCtx("biz_admin"), &Nothing{})
-	//
-	//	wait(200) // 2 sec
-	//
-	//	expectedStat1 := &Stat{
-	//		ByMethod: map[string]uint64{
-	//			"/main.Biz/Check":        1,
-	//			"/main.Biz/Add":          1,
-	//			"/main.Biz/Test":         1,
-	//			"/main.Admin/Statistics": 1,
-	//		},
-	//		ByConsumer: map[string]uint64{
-	//			"biz_user":  2,
-	//			"biz_admin": 1,
-	//			"stat2":     1,
-	//		},
-	//	}
-	//
-	//	mu.Lock()
-	//	if !reflect.DeepEqual(stat1, expectedStat1) {
-	//		fmt.Printf("stat1-1 dont match\nhave %+v\nwant %+v", stat1, expectedStat1)
-	//	} else {
-	//		fmt.Printf("DONE 1 !!!!!!!!!!!!!!!!!!!!!!!!\n")
-	//	}
-	//	mu.Unlock()
-	//
-	//	biz.Add(getConsumerCtx("biz_admin"), &Nothing{})
-	//
-	//	wait(200) // 2+ sec
-	//
-	//	expectedStat1 = &Stat{
-	//		Timestamp: 0,
-	//		ByMethod: map[string]uint64{
-	//			"/main.Biz/Add": 1,
-	//		},
-	//		ByConsumer: map[string]uint64{
-	//			"biz_admin": 1,
-	//		},
-	//	}
-	//	expectedStat2 := &Stat{
-	//		Timestamp: 0,
-	//		ByMethod: map[string]uint64{
-	//			"/main.Biz/Check": 1,
-	//			"/main.Biz/Add":   2,
-	//			"/main.Biz/Test":  1,
-	//		},
-	//		ByConsumer: map[string]uint64{
-	//			"biz_user":  2,
-	//			"biz_admin": 2,
-	//		},
-	//	}
-	//
-	//	mu.Lock()
-	//	if !reflect.DeepEqual(stat1, expectedStat1) {
-	//		fmt.Printf("stat1-2 dont match\nhave %+v\nwant %+v", stat1, expectedStat1)
-	//	} else {
-	//		fmt.Printf("DONE 1-2 !!!!!!!!!!!!!!!!!!!!!!!!\n")
-	//	}
-	//	if !reflect.DeepEqual(stat2, expectedStat2) {
-	//		fmt.Printf("stat2 dont match\nhave %+v\nwant %+v", stat2, expectedStat2)
-	//	} else {
-	//		fmt.Printf("DONE 2 !!!!!!!!!!!!!!!!!!!!!!!!\n")
-	//	}
-	//	mu.Unlock()
-	//
-	//	finish()
-
 }
