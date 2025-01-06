@@ -123,8 +123,8 @@ func (a *AdminService) updateStat(mes *Event) {
 		if mes.Consumer == getCtxVal(str.Context(), "consumer") && strings.HasSuffix(mes.Method, "/Statistics") {
 			return true // Это аналог continue
 		}
-		//fmt.Println("updateStat start", mes.Method, str, a.stat)
-		wg.Add(2)
+		wg.Add(1)
+		// Запускаем параллельно обновление статистики для стрима
 		go func() {
 			defer wg.Done()
 			a.muStat.Lock()
@@ -144,7 +144,7 @@ func (a *AdminService) updateStat(mes *Event) {
 		//fmt.Println("updateStat end", mes.Method, str, a.stat)
 		return true
 	})
-	wg.Wait()
+	wg.Wait() // Ждем все расчеты статистики
 }
 
 func (a *AdminService) sendStat(si *StatInterval, str grpc.ServerStreamingServer[Stat]) {
@@ -188,9 +188,11 @@ func (a *AdminService) Statistics(si *StatInterval, str grpc.ServerStreamingServ
 		consumer,
 		method,
 		getRemoteAddr(str.Context())}
-	// отправки статистики
+
+	// запускаем отправку статистики
 	go a.sendStat(si, str)
 
+	// запускаем процесс обновления статистики при первом запуске
 	a.onceCalcStat.Do(func() {
 		for val := range a.pipeStat {
 			go a.updateStat(val) // запуск обновления статистики
@@ -215,6 +217,7 @@ func NewBizService(pipeEvent chan *Event, pipeStat chan *Event, host string, ACL
 	return &BizService{sync.RWMutex{}, pipeEvent, pipeStat, host, ACLMap}
 }
 
+// checkConsumer проверка подписчика по карте доступов
 func checkConsumer(ctx context.Context, ACLMap map[string][]string) bool {
 	var (
 		methodCall    string
@@ -267,6 +270,7 @@ func (b *BizService) Test(ctx context.Context, _ *Nothing) (*Nothing, error) {
 func (b *BizService) mustEmbedUnimplementedBizServer() {
 }
 
+// runGRPCServer запуск сервера логирования
 func runGRPCServer(ctx context.Context, listenAddr string, ACLMap map[string][]string) {
 	pipeEvent := make(chan *Event, 10)
 	pipeStat := make(chan *Event, 10)
