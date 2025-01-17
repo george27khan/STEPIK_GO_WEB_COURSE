@@ -1,26 +1,25 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
 )
 
-type Simple struct {
-	ID       int
-	Username string
-	Active   bool
-}
-type Complex struct {
-	SubSimple  Simple
-	ManySimple []Simple
-	Blocks     []IDBlock
-	Test       string
-}
-type IDBlock struct {
-	ID int
-}
+//type Simple struct {
+//	ID       int
+//	Username string
+//	Active   bool
+//}
+//type Complex struct {
+//	SubSimple  Simple
+//	ManySimple []Simple
+//	Blocks     []IDBlock
+//	Test       string
+//}
+//type IDBlock struct {
+//	ID int
+//}
 
 func checkFloat64ToInt(val float64) bool {
 	if _, fracPart := math.Modf(val); fracPart == 0 && val < float64(math.MaxInt) && val > float64(math.MinInt) {
@@ -90,19 +89,22 @@ func parseSimpleType(mapVal reflect.Value, targetVal reflect.Value, fieldInfo re
 
 	targetType := targetVal.FieldByName(fieldInfo.Name).Type().Name()
 	sourceType := mapVal.Elem().Type().Name()
+	fmt.Println("targetType, sourceType", targetType, sourceType)
 	// обработка int
 	if targetType == "int" {
-		floatVal := mapVal.Elem().Float()
-		if sourceType == "float64" && checkFloat64ToInt(floatVal) {
-			targetVal.FieldByName(fieldInfo.Name).SetInt(int64(floatVal))
+		if sourceType == "float64" {
+			floatVal := mapVal.Elem().Float()
+			if checkFloat64ToInt(floatVal) {
+				targetVal.FieldByName(fieldInfo.Name).SetInt(int64(floatVal))
+			}
 		} else {
 			return fmt.Errorf("invalid source for int target")
 		}
 	}
 	// обработка string
 	if targetType == "string" {
-		stringVal := mapVal.Elem().String()
-		if sourceType == "string" {
+		if targetType == sourceType {
+			stringVal := mapVal.Elem().String()
 			targetVal.FieldByName(fieldInfo.Name).SetString(stringVal)
 		} else {
 			return fmt.Errorf("invalid source for string target")
@@ -111,8 +113,8 @@ func parseSimpleType(mapVal reflect.Value, targetVal reflect.Value, fieldInfo re
 
 	// обработка bool
 	if targetType == "bool" {
-		boolVal := mapVal.Elem().Bool()
-		if sourceType == "bool" {
+		if targetType == sourceType {
+			boolVal := mapVal.Elem().Bool()
 			targetVal.FieldByName(fieldInfo.Name).SetBool(boolVal)
 		} else {
 			return fmt.Errorf("invalid source for bool target")
@@ -123,8 +125,11 @@ func parseSimpleType(mapVal reflect.Value, targetVal reflect.Value, fieldInfo re
 
 func rec(sourceVal reflect.Value, targetVal reflect.Value) error {
 	fmt.Println("-------------------------------")
+	if !sourceVal.IsValid() || !targetVal.IsValid() {
+		return fmt.Errorf("Invalid data")
+	}
 	fmt.Println("targetVal ", targetVal, targetVal.Kind(), targetVal.Type(), targetVal.CanSet())
-	fmt.Println("sourceVal ", sourceVal, sourceVal.Kind(), sourceVal.Type(), sourceVal.CanSet(), sourceVal.Elem().Len())
+	fmt.Println("sourceVal ", sourceVal, sourceVal.Kind(), sourceVal.CanSet())
 	// если слайс
 	if targetVal.Kind() == reflect.Slice {
 		// создаем буфферный массив
@@ -168,63 +173,92 @@ func rec(sourceVal reflect.Value, targetVal reflect.Value) error {
 
 func i2s(data interface{}, out interface{}) error {
 	// todo
+	fmt.Println("-----------------------------------new")
+	if reflect.ValueOf(out).Kind() != reflect.Pointer {
+		return fmt.Errorf("пришел не ссылочный тип - мы не сможем вернуть результат")
+	}
 	outElm := reflect.ValueOf(out).Elem()
 	dataElm := reflect.ValueOf(data)
 	fmt.Println("outElm ", outElm, outElm.Kind(), outElm.Type())
 	fmt.Println("dataIn ", dataElm, dataElm.Kind(), dataElm.Type())
-
-	visibleFields := reflect.VisibleFields(outElm.Type())
-
-	for i, fieldInfo := range visibleFields {
-		fmt.Println("Field:", fieldInfo.Name)
-		if fieldInfo.Type.Kind() == reflect.Struct || fieldInfo.Type.Kind() == reflect.Slice {
-			outElmField := outElm.Field(i)
-			dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
-			fmt.Println("dataElmValue", dataElmValue)
-			rec(dataElmValue, outElmField)
-			//} else if fieldInfo.Type.Kind() == reflect.Slice {
-			//	outElmField := outElm.Field(i)
-			//	dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
-			//	rec(dataElmValue, outElmField)
-		} else {
-			fmt.Println(fieldInfo.Type.Kind())
-			dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
-			fmt.Println("dataElm", dataElm)
-			fmt.Println("dataElmValue", dataElmValue.Elem().Type().String())
-			parseSimpleType(dataElmValue, outElm, fieldInfo)
+	if !dataElm.IsValid() || !outElm.IsValid() {
+		return fmt.Errorf("Invalid data")
+	}
+	if outElm.Kind().String() == "struct" && dataElm.Kind().String() != "map" {
+		return fmt.Errorf("ожидаем структуру - пришел массив")
+	}
+	if outElm.Kind() == reflect.Slice && outElm.Type().Elem().Kind().String() == "struct" {
+		// создаем буфферный массив
+		newTargetVal := reflect.New(outElm.Type())
+		// проходим по слайсу источника а не таргета, т.к. там значения
+		for i := 0; i < dataElm.Len(); i++ {
+			fmt.Println("slice info: ", outElm.Type())
+			//создаем новый элемент для слайса, его передаем в рекурсию для заполнения
+			newTargetValElm := reflect.New(outElm.Type().Elem())
+			if err := rec(dataElm.Index(i), newTargetValElm.Elem()); err != nil {
+				return err
+			}
+			// заполняем буфферный массив, т.к. reflect.Append создает новый массив и напрямую делать в массив источника нельзя
+			newTargetVal = reflect.Append(outElm, newTargetValElm.Elem())
+			// кладем буфферный массив в структуру
+			outElm.Set(newTargetVal)
 		}
+	} else if outElm.Kind() == reflect.Struct {
+
+		visibleFields := reflect.VisibleFields(outElm.Type())
+
+		for i, fieldInfo := range visibleFields {
+			fmt.Println("Field:", fieldInfo.Name)
+			if fieldInfo.Type.Kind() == reflect.Struct || fieldInfo.Type.Kind() == reflect.Slice {
+				outElmField := outElm.Field(i)
+				dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
+				fmt.Println("dataElmValue", dataElmValue)
+				if err := rec(dataElmValue, outElmField); err != nil {
+					return err
+				}
+				//} else if fieldInfo.Type.Kind() == reflect.Slice {
+				//	outElmField := outElm.Field(i)
+				//	dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
+				//	rec(dataElmValue, outElmField)
+			} else {
+				fmt.Println(fieldInfo.Type.Kind())
+				dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
+				fmt.Println("dataElm", dataElm)
+				fmt.Println("dataElmValue", dataElmValue.Elem().Type().String())
+				if err := parseSimpleType(dataElmValue, outElm, fieldInfo); err != nil {
+					return err
+				}
+			}
+		}
+
+	} else {
+		return fmt.Errorf("Bad data type")
 	}
 	fmt.Println("out", out)
 
 	return nil
 }
 
-func main() {
-	smpl := Simple{
-		ID:       42,
-		Username: "rvasily",
-		Active:   true,
-	}
-	expected := &Complex{
-		SubSimple:  smpl,
-		ManySimple: []Simple{smpl, smpl},
-		Blocks:     []IDBlock{IDBlock{42}, IDBlock{42}},
-		Test:       "test",
-	}
-
-	jsonRaw, _ := json.Marshal(expected)
-	// fmt.Println(string(jsonRaw))
-
-	var tmpData interface{}
-	json.Unmarshal(jsonRaw, &tmpData)
-
-	result := new(Complex)
-	err := i2s(tmpData, result)
-
-	if err != nil {
-		fmt.Printf("unexpected error: %v", err)
-	}
-	if !reflect.DeepEqual(expected, result) {
-		fmt.Printf("results not match\nGot:\n%#v\nExpected:\n%#v", result, expected)
-	}
-}
+//func main() {
+//	smpl := Simple{
+//		ID:       42,
+//		Username: "rvasily",
+//		Active:   true,
+//	}
+//	expected := []Simple{smpl, smpl}
+//
+//	jsonRaw, _ := json.Marshal(expected)
+//
+//	var tmpData interface{}
+//	json.Unmarshal(jsonRaw, &tmpData)
+//
+//	result := []Simple{}
+//	err := i2s(tmpData, &result)
+//
+//	if err != nil {
+//		fmt.Printf("unexpected error: %v", err)
+//	}
+//	if !reflect.DeepEqual(expected, result) {
+//		fmt.Printf("results not match\nGot:\n%#v\nExpected:\n%#v", result, expected)
+//	}
+//}
