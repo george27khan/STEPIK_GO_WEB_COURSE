@@ -79,23 +79,27 @@ func i2s11(data interface{}, out interface{}) error {
 	return nil
 }
 
+// parseSimpleType разбор простого типа для маппинга
+//
+//	targetVal это уже
 func parseSimpleType(mapVal reflect.Value, targetVal reflect.Value, fieldInfo reflect.StructField) error {
 	fmt.Println("Change field:", fieldInfo.Name, fieldInfo.Type)
-	fmt.Println("mapVal", mapVal)
-	if mapVal.Elem().Kind() == reflect.Map {
-		mapVal = mapVal.Elem().MapIndex(reflect.ValueOf(fieldInfo.Name))
-		fmt.Println("mapVal ", mapVal.Elem().Type(), mapVal.Elem().Type().Name(), targetVal.FieldByName(fieldInfo.Name).Type().Name())
-	}
+	fmt.Println("mapVal", mapVal.Kind())
+	//
+	//if mapVal.Elem().Kind() == reflect.Map {
+	//	mapVal = mapVal.Elem().MapIndex(reflect.ValueOf(fieldInfo.Name))
+	//	fmt.Println("mapVal ", mapVal.Elem().Type(), mapVal.Elem().Type().Name(), targetVal.FieldByName(fieldInfo.Name).Type().Name())
+	//}
 
-	targetType := targetVal.FieldByName(fieldInfo.Name).Type().Name()
-	sourceType := mapVal.Elem().Type().Name()
-	fmt.Println("targetType, sourceType", targetType, sourceType)
+	targetType := targetVal.Type().Name()
+	sourceType := mapVal.Type().Name()
+	fmt.Println("targetType, sourceType", targetType, sourceType, mapVal)
 	// обработка int
 	if targetType == "int" {
 		if sourceType == "float64" {
-			floatVal := mapVal.Elem().Float()
+			floatVal := mapVal.Float()
 			if checkFloat64ToInt(floatVal) {
-				targetVal.FieldByName(fieldInfo.Name).SetInt(int64(floatVal))
+				targetVal.SetInt(int64(floatVal))
 			}
 		} else {
 			return fmt.Errorf("invalid source for int target")
@@ -104,8 +108,8 @@ func parseSimpleType(mapVal reflect.Value, targetVal reflect.Value, fieldInfo re
 	// обработка string
 	if targetType == "string" {
 		if targetType == sourceType {
-			stringVal := mapVal.Elem().String()
-			targetVal.FieldByName(fieldInfo.Name).SetString(stringVal)
+			stringVal := mapVal.String()
+			targetVal.SetString(stringVal)
 		} else {
 			return fmt.Errorf("invalid source for string target")
 		}
@@ -114,8 +118,8 @@ func parseSimpleType(mapVal reflect.Value, targetVal reflect.Value, fieldInfo re
 	// обработка bool
 	if targetType == "bool" {
 		if targetType == sourceType {
-			boolVal := mapVal.Elem().Bool()
-			targetVal.FieldByName(fieldInfo.Name).SetBool(boolVal)
+			boolVal := mapVal.Bool()
+			targetVal.SetBool(boolVal)
 		} else {
 			return fmt.Errorf("invalid source for bool target")
 		}
@@ -128,6 +132,9 @@ func rec(sourceVal reflect.Value, targetVal reflect.Value) error {
 	if !sourceVal.IsValid() || !targetVal.IsValid() {
 		return fmt.Errorf("Invalid data")
 	}
+	if targetVal.Kind().String() == "struct" && sourceVal.Kind().String() != "map" {
+		return fmt.Errorf("Invalid source type for data")
+	}
 	fmt.Println("targetVal ", targetVal, targetVal.Kind(), targetVal.Type(), targetVal.CanSet())
 	fmt.Println("sourceVal ", sourceVal, sourceVal.Kind(), sourceVal.CanSet())
 	// если слайс
@@ -135,11 +142,11 @@ func rec(sourceVal reflect.Value, targetVal reflect.Value) error {
 		// создаем буфферный массив
 		newTargetVal := reflect.New(targetVal.Type())
 		// проходим по слайсу источника а не таргета, т.к. там значения
-		for i := 0; i < sourceVal.Elem().Len(); i++ {
+		for i := 0; i < sourceVal.Len(); i++ {
 			fmt.Println("slice info: ", targetVal.Type())
 			//создаем новый элемент для слайса, его передаем в рекурсию для заполнения
 			newTargetValElm := reflect.New(targetVal.Type().Elem())
-			rec(sourceVal.Elem().Index(i), newTargetValElm.Elem())
+			rec(sourceVal.Index(i).Elem(), newTargetValElm.Elem())
 			// заполняем буфферный массив, т.к. reflect.Append создает новый массив и напрямую делать в массив источника нельзя
 			newTargetVal = reflect.Append(targetVal, newTargetValElm.Elem())
 			// кладем буфферный массив в структуру
@@ -160,7 +167,10 @@ func rec(sourceVal reflect.Value, targetVal reflect.Value) error {
 				fmt.Println("n ", n, n.Kind(), n.Type(), n.CanSet())
 				rec(targetVal.MapIndex(reflect.ValueOf(fieldInfo.Name)), n)
 			} else { // если простой тип
-				if err := parseSimpleType(sourceVal, targetVal, fieldInfo); err != nil {
+				//mapVal.Elem().MapIndex(reflect.ValueOf(fieldInfo.Name))
+				fmt.Println("sourceVal", sourceVal, sourceVal.Type(), sourceVal.Kind())
+				//dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name)
+				if err := parseSimpleType(sourceVal.MapIndex(reflect.ValueOf(fieldInfo.Name)).Elem(), targetVal.FieldByName(fieldInfo.Name), fieldInfo); err != nil {
 					return err
 				}
 			}
@@ -195,7 +205,7 @@ func i2s(data interface{}, out interface{}) error {
 			fmt.Println("slice info: ", outElm.Type())
 			//создаем новый элемент для слайса, его передаем в рекурсию для заполнения
 			newTargetValElm := reflect.New(outElm.Type().Elem())
-			if err := rec(dataElm.Index(i), newTargetValElm.Elem()); err != nil {
+			if err := rec(dataElm.Index(i).Elem(), newTargetValElm.Elem()); err != nil {
 				return err
 			}
 			// заполняем буфферный массив, т.к. reflect.Append создает новый массив и напрямую делать в массив источника нельзя
@@ -212,8 +222,11 @@ func i2s(data interface{}, out interface{}) error {
 			if fieldInfo.Type.Kind() == reflect.Struct || fieldInfo.Type.Kind() == reflect.Slice {
 				outElmField := outElm.Field(i)
 				dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
-				fmt.Println("dataElmValue", dataElmValue)
-				if err := rec(dataElmValue, outElmField); err != nil {
+				fmt.Println("dataElmValue", dataElmValue, dataElm)
+				if !dataElmValue.IsValid() {
+					return fmt.Errorf("поле в источнике пустое")
+				}
+				if err := rec(dataElmValue.Elem(), outElmField); err != nil {
 					return err
 				}
 				//} else if fieldInfo.Type.Kind() == reflect.Slice {
@@ -225,7 +238,8 @@ func i2s(data interface{}, out interface{}) error {
 				dataElmValue := dataElm.MapIndex(reflect.ValueOf(fieldInfo.Name))
 				fmt.Println("dataElm", dataElm)
 				fmt.Println("dataElmValue", dataElmValue.Elem().Type().String())
-				if err := parseSimpleType(dataElmValue, outElm, fieldInfo); err != nil {
+
+				if err := parseSimpleType(dataElmValue.Elem(), outElm.FieldByName(fieldInfo.Name), fieldInfo); err != nil {
 					return err
 				}
 			}
