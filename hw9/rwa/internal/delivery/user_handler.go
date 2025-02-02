@@ -10,12 +10,16 @@ import (
 )
 
 var (
-	errCreateUser error = errors.New("Create user error.")
+	errCreateUser  error = errors.New("Create user error.")
+	errLoginUser   error = errors.New("Login user error.")
+	errRequestBody error = errors.New("Unmarshal body error.")
+	errHTTPMethod  error = errors.New("Bad HTTP method.")
 )
 
 // интерфейс для обращения в usecase
 type UserUseCase interface {
-	Register(ctx context.Context, user *dto.UserCreate) error
+	Register(ctx context.Context, userCreate *dto.UserCreate) (*dto.UserCreateResp, error)
+	Login(ctx context.Context, userCreate *dto.UserCreate) (*dto.UserCreateResp, error)
 }
 
 func NewUserHandler(useCase UserUseCase) *UserHandler {
@@ -37,26 +41,52 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		ctx := context.TODO()
 		userCreate := &dto.UserCreate{}
-		body := r.Body
-		if err := json.NewDecoder(body).Decode(userCreate); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Ошибка при разборе JSON из тела запроса"))
+		if err := json.NewDecoder(r.Body).Decode(userCreate); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf(errRequestBody.Error(), err.Error()))
+			return
 		}
 		//валидация
 
 		//сохранение
-		err := u.useCase.Register(ctx, userCreate)
+		userResp, err := u.useCase.Register(ctx, userCreate)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf(errCreateUser.Error(), err.Error()))
+			return
+		}
+		resp, err := json.Marshal(userResp)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf(errCreateUser.Error(), err.Error()))
+			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("Пользователь создан!"))
+		w.Write(resp)
+		return
 	}
-
-	//ser\":{\"email\":\"{{EMAIL}}\", \"password\":\"{{PASSWORD}}\", \"username\":\"{{USERNAME}}\"}}",
-
+	writeError(w, http.StatusBadRequest, errHTTPMethod)
 }
 
 func (u *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("hello world!"))
+	if r.Method == http.MethodPost {
+		ctx := context.TODO()
+		user := &dto.UserCreate{}
+		if err := json.NewDecoder(r.Body).Decode(user); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf(errRequestBody.Error(), err.Error()))
+			return
+		}
+		userResp, err := u.useCase.Login(ctx, user)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf(errLoginUser.Error(), err.Error()))
+			return
+		}
+		resp, err := json.Marshal(userResp)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf(errLoginUser.Error(), err.Error()))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Println("string(resp)", string(resp))
+		w.Write(resp)
+		return
+	}
+	writeError(w, http.StatusBadRequest, errHTTPMethod)
 }

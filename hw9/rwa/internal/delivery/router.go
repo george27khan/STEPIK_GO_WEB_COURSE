@@ -2,14 +2,19 @@ package delivery
 
 import (
 	"net/http"
-	"rwa/internal/db"
 )
 
-func NewServerMUX() *http.ServeMux {
-	db := db.NewDBStorage()
-	user := NewUserHandler(db)
+type mainHandler struct {
+	userHandler *UserHandler
+}
+
+func NewMainHandler(userHandler *UserHandler) *mainHandler {
+	return &mainHandler{userHandler}
+}
+func NewServerMUX(mainHAndler *mainHandler) *http.ServeMux {
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/users", user.Register)
-	mux.HandleFunc("/users/login", user.Login)
+	mux.HandleFunc("/api/users", mainHAndler.userHandler.Register)
+	mux.HandleFunc("/api/users/login", mainHAndler.userHandler.Login)
 	return mux
 }

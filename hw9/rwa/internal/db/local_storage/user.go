@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-type user struct {
+type User struct {
 	ID        string
 	Email     string
 	CreatedAt time.Time
@@ -23,14 +23,14 @@ type user struct {
 }
 
 type UserStorage struct {
-	Users  map[string]*user
+	Users  map[string]*User
 	UserID int
 	Mu     *sync.RWMutex
 }
 
 // NewDBStorage создание хранилища данных
 func NewUserStorage() *UserStorage {
-	users := make(map[string]*user)
+	users := make(map[string]*User)
 	return &UserStorage{users,
 		0,
 		&sync.RWMutex{},
@@ -39,7 +39,7 @@ func NewUserStorage() *UserStorage {
 
 // CreateUser создание пользователя в хранилище, дополняет переданную модель
 func (ls *UserStorage) Create(ctx context.Context, userDM *dm.User) error {
-	userDB := &user{Username: userDM.Username,
+	userDB := &User{Username: userDM.Username,
 		Email:     userDM.Email,
 		Password:  userDM.Password,
 		CreatedAt: userDM.CreatedAt,
@@ -59,6 +59,20 @@ func (ls *UserStorage) Create(ctx context.Context, userDM *dm.User) error {
 	return nil
 }
 
-//func (ls *UserStorage) Get() {
-//
-//}
+func (ls *UserStorage) Get(ctx context.Context, email string) (*dm.User, error) {
+	ls.Mu.RLock()
+	defer ls.Mu.RUnlock()
+	if user, ok := ls.Users[email]; ok {
+		userDm := &dm.User{
+			user.ID,
+			user.Email,
+			user.Username,
+			user.Password,
+			user.CreatedAt,
+			user.UpdatedAt,
+		}
+		return userDm, nil
+	} else {
+		return nil, fmt.Errorf("User not found")
+	}
+}

@@ -13,5 +13,6 @@ require (
 	github.com/jmoiron/sqlx v1.3.4
 	github.com/mcuadros/go-lookup v0.0.0-20200831155250-80f87a4fa5ee
 	github.com/stretchr/testify v1.7.0
+	golang.org/x/crypto v0.0.0-20191205180655-e7c4368fe9dd
 	gopkg.in/d4l3k/messagediff.v1 v1.2.1
 )

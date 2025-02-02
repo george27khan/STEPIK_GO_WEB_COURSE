@@ -21,7 +21,7 @@ import (
 //}
 
 type UserStorage interface {
-	Register(ctx context.Context, user *dm.User) (string, error)
+	Register(ctx context.Context, user *dm.User) error
 }
 
 type Repository struct {

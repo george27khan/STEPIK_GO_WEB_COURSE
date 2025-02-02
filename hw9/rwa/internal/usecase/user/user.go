@@ -18,15 +18,16 @@ var (
 	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 )
 
-type Repository interface {
-	Register(ctx context.Context, user *dm.User) error
+type UserRepository interface {
+	Create(ctx context.Context, user *dm.User) error
+	Get(ctx context.Context, email string) (*dm.User, error)
 }
 
 type UserUseCase struct {
-	db Repository
+	db UserRepository
 }
 
-func NewUserUseCase(db Repository) *UserUseCase {
+func NewUserUseCase(db UserRepository) *UserUseCase {
 	return &UserUseCase{db}
 }
 
@@ -46,12 +47,13 @@ func (uc *UserUseCase) hashPassword(password string, salt string) []byte {
 }
 
 // passwordIsValid валидация пароля при входе
-func (uc *UserUseCase) passwordIsValid(password string) bool {
+func (uc *UserUseCase) passwordIsValid(password string, passwordDB []byte) bool {
+
 	return true
 }
 
 // Register бизнес логика регистрации пользователя
-func (uc *UserUseCase) Register(ctx context.Context, userCreate *dto.UserCreate) error {
+func (uc *UserUseCase) Register(ctx context.Context, userCreate *dto.UserCreate) (*dto.UserCreateResp, error) {
 	//бизнес логика
 	user := &dm.User{
 		ID:        "",
@@ -63,13 +65,34 @@ func (uc *UserUseCase) Register(ctx context.Context, userCreate *dto.UserCreate)
 	}
 
 	// отправка в хранилище
-	if err := uc.db.Register(ctx, user); err != nil {
-		return fmt.Errorf("Ошибка при сохранении пользователя в БД: %s", err.Error())
+	if err := uc.db.Create(ctx, user); err != nil {
+		return nil, fmt.Errorf("Ошибка при сохранении пользователя в БД: %s", err.Error())
 	}
 
 	// инициализируем поля присланной структуры для ответа
-	userCreate.Info.CreatedAt = user.CreatedAt
-	userCreate.Info.UpdatedAt = user.UpdatedAt
 
-	return nil
+	return &dto.UserCreateResp{dto.InfoCreateResp{
+		user.Email,
+		user.Username,
+		user.CreatedAt,
+		user.UpdatedAt}}, nil
+}
+
+func (uc *UserUseCase) Login(ctx context.Context, userCreate *dto.UserCreate) (*dto.UserCreateResp, error) {
+	userDB, err := uc.db.Get(ctx, userCreate.Info.Email)
+	if err != nil {
+		return nil, err
+	}
+	if !uc.passwordIsValid(userCreate.Info.Password, userDB.Password) {
+		return nil, fmt.Errorf("Invalid password for user %s", userCreate.Info.Email)
+	}
+	userResp := &dto.UserCreateResp{
+		dto.InfoCreateResp{
+			userDB.Email,
+			userDB.Username,
+			userDB.CreatedAt,
+			userDB.UpdatedAt,
+		}}
+	return userResp, nil
+
 }
