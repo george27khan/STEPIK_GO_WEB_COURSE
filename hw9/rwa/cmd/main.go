@@ -3,21 +3,24 @@ package main
 import (
 	"net/http"
 	"rwa/internal/db"
-	http2 "rwa/internal/delivery/http"
-	"rwa/internal/delivery/http/handler"
-	use_case "rwa/internal/usecase"
-	session_case "rwa/internal/usecase/session"
-	user_case "rwa/internal/usecase/user"
+	"rwa/internal/delivery/http/route"
+	"rwa/internal/delivery/http/route/handler"
+	"rwa/internal/usecase"
+	"rwa/internal/usecase/article"
+	"rwa/internal/usecase/session"
+	"rwa/internal/usecase/user"
 )
 
 func main() {
 	dbLocal := db.NewDBStorage()
-	userCase := user_case.NewUserUseCase(dbLocal.User)
-	sessCase := session_case.NewSessionUseCase(dbLocal.Session)
-	useCase := use_case.NewUseCase(userCase)
+	sessCase := session.NewSessionUseCase(dbLocal.Session)
+	userCase := user.NewUserUseCase(dbLocal.User, sessCase)
+	articleCase := article.NewArticleUseCase(dbLocal.Article, userCase)
+	useCase := usecase.NewUseCase(userCase, articleCase)
 	userHandler := handler.NewUserHandler(useCase, sessCase)
 	sessionHandler := handler.NewSessionHandler(sessCase)
-	mainHandler := http2.NewMainHandler(userHandler, sessionHandler)
-	mux := http2.NewServerMUX(mainHandler)
+	articleHandler := handler.NewArticleHandler(articleCase)
+	mainHandler := route.NewMainHandler(userHandler, sessionHandler, articleHandler)
+	mux := route.NewServerMUX(mainHandler)
 	http.ListenAndServe(":8080", mux)
 }

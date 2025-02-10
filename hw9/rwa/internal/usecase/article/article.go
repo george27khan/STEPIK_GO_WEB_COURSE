@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/google/uuid"
-	h "rwa/internal/delivery/http/handler"
+	h "rwa/internal/delivery/http/route/handler"
 	dm "rwa/internal/domain"
 	"rwa/internal/usecase/user"
 )

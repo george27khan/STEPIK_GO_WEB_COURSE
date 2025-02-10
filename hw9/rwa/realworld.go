@@ -3,9 +3,9 @@ package main
 import (
 	"net/http"
 	"rwa/internal/db"
-	http2 "rwa/internal/delivery/http"
-	"rwa/internal/delivery/http/handler"
-	use_case "rwa/internal/usecase"
+	"rwa/internal/delivery/http/route"
+	"rwa/internal/delivery/http/route/handler"
+	"rwa/internal/usecase"
 	article "rwa/internal/usecase/article"
 	session "rwa/internal/usecase/session"
 	user "rwa/internal/usecase/user"
@@ -19,11 +19,11 @@ func GetApp() http.Handler {
 	sessCase := session.NewSessionUseCase(dbLocal.Session)
 	userCase := user.NewUserUseCase(dbLocal.User, sessCase)
 	articleCase := article.NewArticleUseCase(dbLocal.Article, userCase)
-	useCase := use_case.NewUseCase(userCase, articleCase)
+	useCase := usecase.NewUseCase(userCase, articleCase)
 	userHandler := handler.NewUserHandler(useCase, sessCase)
 	sessionHandler := handler.NewSessionHandler(sessCase)
 	articleHandler := handler.NewArticleHandler(articleCase)
-	mainHandler := http2.NewMainHandler(userHandler, sessionHandler, articleHandler)
-	mux := http2.NewServerMUX(mainHandler)
+	mainHandler := route.NewMainHandler(userHandler, sessionHandler, articleHandler)
+	mux := route.NewServerMUX(mainHandler)
 	return mux
 }

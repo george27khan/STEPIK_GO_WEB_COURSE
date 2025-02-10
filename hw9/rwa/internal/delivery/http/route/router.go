@@ -1,17 +1,17 @@
-package http
+package route
 
 import (
 	"net/http"
-	"rwa/internal/delivery/http/handler"
+	handler2 "rwa/internal/delivery/http/route/handler"
 )
 
 type mainHandler struct {
-	userHandler    *handler.UserHandler
-	sessionHandler *handler.SessionHandler
-	articleHandler *handler.ArticleHandler
+	userHandler    *handler2.UserHandler
+	sessionHandler *handler2.SessionHandler
+	articleHandler *handler2.ArticleHandler
 }
 
-func NewMainHandler(userHandler *handler.UserHandler, sessionHandler *handler.SessionHandler, articleHandler *handler.ArticleHandler) *mainHandler {
+func NewMainHandler(userHandler *handler2.UserHandler, sessionHandler *handler2.SessionHandler, articleHandler *handler2.ArticleHandler) *mainHandler {
 	return &mainHandler{userHandler, sessionHandler, articleHandler}
 }
 func NewServerMUX(mainHandler *mainHandler) http.Handler {
