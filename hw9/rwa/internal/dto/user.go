@@ -1,26 +1,40 @@
 package dto
 
-import "time"
+import (
+	"time"
+)
 
-type InfoCreate struct {
-	Email     string `json:"email"`
-	Username  string `json:"username,omitempty"`
-	Password  string `json:"password"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-type UserCreate struct {
-	Info InfoCreate `json:"user"`
-}
-
-type InfoCreateResp struct {
+type UserReqInfo struct {
+	ID        string    `json:"id"`
 	Email     string    `json:"email"`
-	Username  string    `json:"username"`
+	Username  string    `json:"username,omitempty"`
+	Password  string    `json:"password"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	BIO       string    `json:"bio"`
+	Token     string    `json:"token"`
 }
 
-type UserCreateResp struct {
-	Info InfoCreateResp `json:"user"`
+type UserReq struct {
+	Info *UserReqInfo `json:"user"`
 }
+
+type Errors struct {
+	Body []string `json:"body"`
+}
+type Error struct {
+	Errors `json:"errors"`
+}
+
+//
+//type UserRespInfo struct {
+//	Email     string    `json:"email"`
+//	Username  string    `json:"username"`
+//	CreatedAt time.Time `json:"createdAt"`
+//	UpdatedAt time.Time `json:"updatedAt"`
+//	Token     string    `json:"token"`
+//}
+//
+//type UserResp struct {
+//	Info UserRespInfo `json:"user"`
+//}

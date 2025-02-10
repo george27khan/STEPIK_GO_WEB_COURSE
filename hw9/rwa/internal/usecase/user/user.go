@@ -3,10 +3,12 @@ package user
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
 	"math/rand"
 	dm "rwa/internal/domain"
 	"rwa/internal/dto"
+	"rwa/internal/usecase/session"
 	"time"
 )
 
@@ -20,15 +22,19 @@ var (
 
 type UserRepository interface {
 	Create(ctx context.Context, user *dm.User) error
-	Get(ctx context.Context, email string) (*dm.User, error)
+	GetByEmail(ctx context.Context, email string) (*dm.User, error)
+	GetByID(ctx context.Context, ID string) (*dm.User, error)
+	GetByUsername(ctx context.Context, username string) (*dm.User, error)
+	Update(ctx context.Context, user *dm.User) (*dm.User, error)
 }
 
 type UserUseCase struct {
-	db UserRepository
+	DBUser         UserRepository
+	SessionUseCase *session.SessionUseCase
 }
 
-func NewUserUseCase(db UserRepository) *UserUseCase {
-	return &UserUseCase{db}
+func NewUserUseCase(dbUser UserRepository, SessionUseCase *session.SessionUseCase) *UserUseCase {
+	return &UserUseCase{dbUser, SessionUseCase}
 }
 
 // randStringRune генерация случайно строки заданной длинны в байтах
@@ -48,51 +54,69 @@ func (uc *UserUseCase) hashPassword(password string, salt string) []byte {
 
 // passwordIsValid валидация пароля при входе
 func (uc *UserUseCase) passwordIsValid(password string, passwordDB []byte) bool {
-
 	return true
 }
 
-// Register бизнес логика регистрации пользователя
-func (uc *UserUseCase) Register(ctx context.Context, userCreate *dto.UserCreate) (*dto.UserCreateResp, error) {
+// Register регистрация пользователя
+func (uc *UserUseCase) Register(ctx context.Context, UserReq *dto.UserReq) (*dm.User, error) {
 	//бизнес логика
 	user := &dm.User{
-		ID:        "",
-		Email:     userCreate.Info.Email,
-		Username:  userCreate.Info.Username,
-		Password:  uc.hashPassword(userCreate.Info.Password, randStringRune(saltLen)), //шифрование пароля
+		ID:        uuid.NewString(),
+		Email:     UserReq.Info.Email,
+		Username:  UserReq.Info.Username,
+		Password:  uc.hashPassword(UserReq.Info.Password, randStringRune(saltLen)), //шифрование пароля
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-
 	// отправка в хранилище
-	if err := uc.db.Create(ctx, user); err != nil {
+	if err := uc.DBUser.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("Ошибка при сохранении пользователя в БД: %s", err.Error())
 	}
-
-	// инициализируем поля присланной структуры для ответа
-
-	return &dto.UserCreateResp{dto.InfoCreateResp{
-		user.Email,
-		user.Username,
-		user.CreatedAt,
-		user.UpdatedAt}}, nil
+	return user, nil
 }
 
-func (uc *UserUseCase) Login(ctx context.Context, userCreate *dto.UserCreate) (*dto.UserCreateResp, error) {
-	userDB, err := uc.db.Get(ctx, userCreate.Info.Email)
+// Login аутентификация пользователя
+func (uc *UserUseCase) Login(ctx context.Context, userCreate *dto.UserReq) (*dm.User, error) {
+	userDB, err := uc.DBUser.GetByEmail(ctx, userCreate.Info.Email)
 	if err != nil {
 		return nil, err
 	}
 	if !uc.passwordIsValid(userCreate.Info.Password, userDB.Password) {
 		return nil, fmt.Errorf("Invalid password for user %s", userCreate.Info.Email)
 	}
-	userResp := &dto.UserCreateResp{
-		dto.InfoCreateResp{
-			userDB.Email,
-			userDB.Username,
-			userDB.CreatedAt,
-			userDB.UpdatedAt,
-		}}
-	return userResp, nil
+	return userDB, nil
+}
 
+// Logout выход пользователя из системы
+func (uc *UserUseCase) Logout(ctx context.Context, sessionID string) error {
+	if err := uc.SessionUseCase.Delete(ctx, sessionID); err != nil {
+		return fmt.Errorf("Ошибка при удалении сесии: %s", err.Error())
+	}
+	return nil
+}
+
+// Get получение пользователя по ID
+func (uc *UserUseCase) Get(ctx context.Context, ID string) (*dm.User, error) {
+	userDB, err := uc.DBUser.GetByID(ctx, ID)
+	if err != nil {
+		return nil, fmt.Errorf("Get user error: %s", err.Error())
+	}
+	return userDB, nil
+}
+
+// Update обновление данных пользователя
+func (uc *UserUseCase) Update(ctx context.Context, userNew *dto.UserReqInfo) (*dm.User, error) {
+	userDM := &dm.User{
+		userNew.ID,
+		userNew.Email,
+		userNew.Username,
+		[]byte{},
+		userNew.CreatedAt,
+		userNew.UpdatedAt,
+		userNew.BIO}
+	userDM, err := uc.DBUser.Update(ctx, userDM)
+	if err != nil {
+		return nil, fmt.Errorf("Update user error: %s", err.Error())
+	}
+	return userDM, nil
 }

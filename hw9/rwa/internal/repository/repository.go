@@ -26,7 +26,7 @@ type UserStorage interface {
 
 type Repository struct {
 	UserStorage
-	//Article
+	//Articles
 	//Session
 }
 

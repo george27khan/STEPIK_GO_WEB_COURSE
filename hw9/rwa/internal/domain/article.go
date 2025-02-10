@@ -1,7 +1,10 @@
 package domain
 
+import "time"
+
 type Article struct {
-	Author         User
+	ID             string
+	Author         *User
 	Body           string
 	Description    string
 	Favorited      bool
@@ -9,5 +12,6 @@ type Article struct {
 	Slug           string
 	TagList        []string
 	Title          string
-	UpdatedAt      bool
+	UpdatedAt      time.Time
+	CreatedAt      time.Time
 }

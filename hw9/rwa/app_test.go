@@ -502,7 +502,6 @@ func TestApp(t *testing.T) {
 			if item.TokenName != "" {
 				req.Header.Add("Authorization", "Token "+tplParams[item.TokenName])
 			}
-
 			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatalf("request error: %v", err)
@@ -526,9 +525,10 @@ func TestApp(t *testing.T) {
 			if err != nil {
 				t.Fatalf("cant unmarshal resp: %s, body: %s", err, respBody)
 			}
-
+			//fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!)", got)
 			diff, equal := messagediff.PrettyDiff(item.Expected, got)
 			if !equal {
+
 				t.Fatalf("\033[1;31mresults not match\033[0m\n \033[1;35mbody\033[0m: %s\n\033[1;32mwant\033[0m %#v\n\033[1;34mgot\033[0m %#v\n\033[1;33mdiff\033[0m:\n%s", respBody, item.Expected, got, diff)
 			}
 

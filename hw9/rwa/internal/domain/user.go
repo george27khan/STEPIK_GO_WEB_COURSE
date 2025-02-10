@@ -9,4 +9,5 @@ type User struct {
 	Password  []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	BIO       string
 }
