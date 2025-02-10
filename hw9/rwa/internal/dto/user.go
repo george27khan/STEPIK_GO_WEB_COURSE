@@ -25,16 +25,3 @@ type Errors struct {
 type Error struct {
 	Errors `json:"errors"`
 }
-
-//
-//type UserRespInfo struct {
-//	Email     string    `json:"email"`
-//	Username  string    `json:"username"`
-//	CreatedAt time.Time `json:"createdAt"`
-//	UpdatedAt time.Time `json:"updatedAt"`
-//	Token     string    `json:"token"`
-//}
-//
-//type UserResp struct {
-//	Info UserRespInfo `json:"user"`
-//}

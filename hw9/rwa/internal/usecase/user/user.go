@@ -1,6 +1,7 @@
 package user
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ var (
 	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 )
 
+// UserRepository интерфейс репозитория юзеров
 type UserRepository interface {
 	Create(ctx context.Context, user *dm.User) error
 	GetByEmail(ctx context.Context, email string) (*dm.User, error)
@@ -28,11 +30,13 @@ type UserRepository interface {
 	Update(ctx context.Context, user *dm.User) (*dm.User, error)
 }
 
+// UserUseCase структура юзкейсов юзеров
 type UserUseCase struct {
 	DBUser         UserRepository
 	SessionUseCase *session.SessionUseCase
 }
 
+// NewUserUseCase конструктор юзкейсов юзеров
 func NewUserUseCase(dbUser UserRepository, SessionUseCase *session.SessionUseCase) *UserUseCase {
 	return &UserUseCase{dbUser, SessionUseCase}
 }
@@ -54,7 +58,7 @@ func (uc *UserUseCase) hashPassword(password string, salt string) []byte {
 
 // passwordIsValid валидация пароля при входе
 func (uc *UserUseCase) passwordIsValid(password string, passwordDB []byte) bool {
-	return true
+	return bytes.Equal(uc.hashPassword(password, string(passwordDB)[:saltLen]), passwordDB)
 }
 
 // Register регистрация пользователя

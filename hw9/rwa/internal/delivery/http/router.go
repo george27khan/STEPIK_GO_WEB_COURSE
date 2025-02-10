@@ -17,8 +17,6 @@ func NewMainHandler(userHandler *handler.UserHandler, sessionHandler *handler.Se
 func NewServerMUX(mainHandler *mainHandler) http.Handler {
 
 	mux := http.NewServeMux()
-	//mux.Handle("/api/", AuthMiddleware(mainHAndler, mux))
-
 	mux.HandleFunc("/api/users", mainHandler.userHandler.Register)
 	mux.HandleFunc("/api/users/login", mainHandler.userHandler.Login)
 	mux.HandleFunc("/api/user", mainHandler.userHandler.User)

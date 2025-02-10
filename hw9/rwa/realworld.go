@@ -15,8 +15,9 @@ import (
 
 func GetApp() http.Handler {
 	dbLocal := db.NewDBStorage()
-	userCase := user.NewUserUseCase(dbLocal.User)
+
 	sessCase := session.NewSessionUseCase(dbLocal.Session)
+	userCase := user.NewUserUseCase(dbLocal.User, sessCase)
 	articleCase := article.NewArticleUseCase(dbLocal.Article, userCase)
 	useCase := use_case.NewUseCase(userCase, articleCase)
 	userHandler := handler.NewUserHandler(useCase, sessCase)

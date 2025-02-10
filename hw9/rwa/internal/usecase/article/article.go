@@ -11,6 +11,7 @@ import (
 
 var _ h.ArticleUseCase = (*ArticleUseCase)(nil)
 
+// ArticleRepository интерфейс репозитория статей
 type ArticleRepository interface {
 	Create(ctx context.Context, article *dm.Article) error
 	GetAll(ctx context.Context) ([]*dm.Article, error)
@@ -18,11 +19,13 @@ type ArticleRepository interface {
 	GetByTag(ctx context.Context, tag string) ([]*dm.Article, error)
 }
 
+// ArticleUseCase структура юзкейсов со статьями
 type ArticleUseCase struct {
 	DBArticle ArticleRepository
 	UserCase  *user.UserUseCase
 }
 
+// NewArticleUseCase конструктор юзкейсов со статьями
 func NewArticleUseCase(DBArticle ArticleRepository, UserCase *user.UserUseCase) *ArticleUseCase {
 	return &ArticleUseCase{DBArticle, UserCase}
 }
@@ -43,6 +46,7 @@ func (a *ArticleUseCase) Create(ctx context.Context, userID string, article *dm.
 	return article, nil
 }
 
+// GetAll получение всех статей
 func (a *ArticleUseCase) GetAll(ctx context.Context) ([]*dm.Article, error) {
 	//получаем статьи их репозитория
 	articles, err := a.DBArticle.GetAll(ctx)
@@ -51,7 +55,6 @@ func (a *ArticleUseCase) GetAll(ctx context.Context) ([]*dm.Article, error) {
 	}
 	// дополняем информацией о пользователе
 	for _, article := range articles {
-
 		user, err := a.UserCase.Get(ctx, article.Author.ID)
 		if err != nil {
 			return nil, fmt.Errorf("Create article error: %s", err.Error())
@@ -61,6 +64,7 @@ func (a *ArticleUseCase) GetAll(ctx context.Context) ([]*dm.Article, error) {
 	return articles, nil
 }
 
+// GetAll получение статей по автору
 func (a *ArticleUseCase) GetByAuthor(ctx context.Context, username string) ([]*dm.Article, error) {
 	//получаем статьи их репозитория
 	userDM, err := a.UserCase.DBUser.GetByUsername(ctx, username)
@@ -78,6 +82,7 @@ func (a *ArticleUseCase) GetByAuthor(ctx context.Context, username string) ([]*d
 	return articles, nil
 }
 
+// GetAll получение статей по тэгу
 func (a *ArticleUseCase) GetByTag(ctx context.Context, tag string) ([]*dm.Article, error) {
 	//получаем статьи из репозитория
 	articles, err := a.DBArticle.GetByTag(ctx, tag)
