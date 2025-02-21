@@ -13,7 +13,11 @@ type taskService interface {
 	GetAll(ctx context.Context) ([]*domain.Task, error)
 	Create(ctx context.Context, task domain.Task) (uint64, error)
 	AssignTask(ctx context.Context, executor string, executorChatID int64, taskID uint64) (domain.Task, error)
+	UnassignTask(ctx context.Context, taskID uint64) error
 	GetExecutorChatID(ctx context.Context, taskID uint64) (int64, error)
+	GetTask(ctx context.Context, taskID uint64) (*domain.Task, error)
+	ResolveTask(ctx context.Context, taskID uint64) error
+	GetUserTask(ctx context.Context, username string, role string) ([]*domain.Task, error)
 }
 
 type Router struct {
@@ -38,6 +42,21 @@ func (r *Router) Route(ctx context.Context) {
 		} else if strings.HasPrefix(command, "/assign") {
 			r.handlerAssignTask(ctx, update)
 			continue
+		} else if strings.HasPrefix(command, "/unassign") {
+			r.handlerUnassignTask(ctx, update)
+			continue
+		} else if strings.HasPrefix(command, "/resolve") {
+			r.handlerResolveTask(ctx, update)
+			continue
+		} else if strings.HasPrefix(command, "/my") {
+			r.handlerGetUserTask(ctx, update)
+			continue
+		} else if strings.HasPrefix(command, "/owner") {
+			r.handlerGetOwnerTask(ctx, update)
+			continue
+		} else if strings.HasPrefix(command, "/owner") {
+			r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Неизвестная команда"))
+			continue
 		}
 
 		//task := domain.Task{
@@ -53,22 +72,23 @@ func (r *Router) handlerGetAllTask(ctx context.Context, update tgbotapi.Update) 
 	if err != nil {
 		fmt.Println(err)
 	}
-	message := strings.Builder{}
+	text := strings.Builder{}
 	for _, task := range tasks {
-		message.WriteString(fmt.Sprintf("%v. %s by @%s", task.ID, task.Text, task.Author))
+		text.WriteString(fmt.Sprintf("%v. %s by @%s", task.ID, task.Text, task.Author))
 		if task.Executor == "" {
-			message.WriteString(fmt.Sprintf("\n/assign_%v", task.ID))
+			text.WriteString(fmt.Sprintf("\n/assign_%v", task.ID))
 		} else if task.Executor == task.Author {
-			message.WriteString("\nassignee: я")
+			text.WriteString("\nassignee: я")
+			text.WriteString(fmt.Sprintf("\n/unassign_%v /resolve_%v", task.ID, task.ID))
 		} else {
-			message.WriteString(fmt.Sprintf("\nassignee: ", task.Executor))
+			text.WriteString(fmt.Sprintf("\nassignee: ", task.Executor))
 		}
-		message.WriteString("\n")
+		text.WriteString("\n")
 	}
-	if message.Len() == 0 {
-		message.WriteString("Нет задач")
+	if text.Len() == 0 {
+		text.WriteString("Нет задач")
 	}
-	r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, message.String()))
+	r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, text.String()))
 }
 
 func (r *Router) handlerCreateTask(ctx context.Context, update tgbotapi.Update) {
@@ -82,7 +102,6 @@ func (r *Router) handlerCreateTask(ctx context.Context, update tgbotapi.Update) 
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println("id", id)
 	message := fmt.Sprintf("Задача \"%s\" создана, id=%v", task.Text, id)
 	r.bot.Send(tgbotapi.NewMessage(task.AuthorChatID, message))
 }
@@ -90,17 +109,16 @@ func (r *Router) handlerCreateTask(ctx context.Context, update tgbotapi.Update) 
 func (r *Router) handlerAssignTask(ctx context.Context, update tgbotapi.Update) {
 	message := update.Message
 	curChatID := message.Chat.ID
-	strID, found := strings.CutPrefix(message.Text, "/assign_")
+	strTaskID, found := strings.CutPrefix(message.Text, "/assign_")
 	if !found {
 		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка определения задачи"))
 		return
 	}
-	taskID, err := strconv.ParseUint(strID, 10, 64)
+	taskID, err := strconv.ParseUint(strTaskID, 10, 64)
 	if err != nil {
 		r.bot.Send(tgbotapi.NewMessage(curChatID, "Неверный формат задачи"))
 		return
 	}
-	prevExecChatID, err := r.taskService.GetExecutorChatID(ctx, taskID)
 	if err != nil {
 		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка при поиске текущего исполнителя"))
 		return
@@ -109,12 +127,130 @@ func (r *Router) handlerAssignTask(ctx context.Context, update tgbotapi.Update) 
 	if err != nil {
 		fmt.Println(err)
 	}
-	messageAuthor := fmt.Sprintf("Задача \"%s\" назначена на %s", task.Text, task.Executor)
+
 	messageExecutor := fmt.Sprintf("Задача \"%s\" назначена на вас", task.Text)
-	if prevExecChatID != 0 {
-		r.bot.Send(tgbotapi.NewMessage(prevExecChatID, messageAuthor))
+	if curChatID == task.AuthorChatID {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, messageExecutor))
 	} else {
+		messageAuthor := fmt.Sprintf("Задача \"%s\" назначена на @%s", task.Text, task.Executor)
+		r.bot.Send(tgbotapi.NewMessage(curChatID, messageExecutor))
 		r.bot.Send(tgbotapi.NewMessage(task.AuthorChatID, messageAuthor))
 	}
-	r.bot.Send(tgbotapi.NewMessage(curChatID, messageExecutor))
+}
+
+func (r *Router) handlerUnassignTask(ctx context.Context, update tgbotapi.Update) {
+	message := update.Message
+	curChatID := message.Chat.ID
+	strTaskID, found := strings.CutPrefix(message.Text, "/unassign_")
+	if !found {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка определения задачи"))
+		return
+	}
+
+	taskID, err := strconv.ParseUint(strTaskID, 10, 64)
+	if err != nil {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Неверный формат задачи"))
+		return
+	}
+
+	task, err := r.taskService.GetTask(ctx, taskID)
+	if err != nil {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка при поиске текущего исполнителя"))
+		return
+	}
+	if task.Executor != message.Chat.UserName {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Задача не на вас"))
+		return
+	}
+
+	if err = r.taskService.UnassignTask(ctx, taskID); err != nil {
+		fmt.Println(err)
+	}
+	if curChatID == task.AuthorChatID {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Принято"))
+	} else {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Принято"))
+		r.bot.Send(tgbotapi.NewMessage(task.AuthorChatID, fmt.Sprintf("Задача \"%s\" осталась без исполнителя", task.Text)))
+	}
+}
+
+func (r *Router) handlerResolveTask(ctx context.Context, update tgbotapi.Update) {
+	message := update.Message
+	curChatID := message.Chat.ID
+	strTaskID, found := strings.CutPrefix(message.Text, "/resolve_")
+	if !found {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка определения задачи"))
+		return
+	}
+
+	taskID, err := strconv.ParseUint(strTaskID, 10, 64)
+	if err != nil {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Неверный формат задачи"))
+		return
+	}
+
+	task, err := r.taskService.GetTask(ctx, taskID)
+	if err != nil {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка при поиске текущего исполнителя"))
+		return
+	}
+	if task.Executor != message.Chat.UserName {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Задача не на вас"))
+		return
+	}
+
+	if err = r.taskService.ResolveTask(ctx, taskID); err != nil {
+		fmt.Println(err)
+	}
+	if curChatID == task.AuthorChatID {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, fmt.Sprintf("Задача \"%s\" выполнена", task.Text)))
+	} else {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, fmt.Sprintf("Задача \"%s\" выполнена", task.Text)))
+		r.bot.Send(tgbotapi.NewMessage(task.AuthorChatID, fmt.Sprintf("Задача \"%s\" выполнена @%s", task.Text, task.Executor)))
+	}
+}
+
+func (r *Router) handlerGetUserTask(ctx context.Context, update tgbotapi.Update) {
+	message := update.Message
+	curChatID := message.Chat.ID
+
+	tasks, err := r.taskService.GetUserTask(ctx, message.Chat.UserName, "executor")
+	if err != nil {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка при поиске задач на исполнителе"))
+		return
+	}
+	text := strings.Builder{}
+	for _, task := range tasks {
+		text.WriteString(fmt.Sprintf("%v. %s by @%s", task.ID, task.Text, task.Author))
+		text.WriteString(fmt.Sprintf("\n/unassign_%v /resolve_%v", task.ID, task.ID))
+		text.WriteString("\n")
+
+	}
+	if text.Len() == 0 {
+		text.WriteString("Нет задач")
+	}
+	r.bot.Send(tgbotapi.NewMessage(curChatID, text.String()))
+}
+
+func (r *Router) handlerGetOwnerTask(ctx context.Context, update tgbotapi.Update) {
+	message := update.Message
+	curChatID := message.Chat.ID
+
+	tasks, err := r.taskService.GetUserTask(ctx, message.Chat.UserName, "author")
+	if err != nil {
+		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка при поиске задач на исполнителе"))
+		return
+	}
+	fmt.Println("tasks", tasks)
+
+	text := strings.Builder{}
+	for _, task := range tasks {
+		text.WriteString(fmt.Sprintf("%v. %s by @%s", task.ID, task.Text, task.Author))
+		text.WriteString(fmt.Sprintf("\n/assign_%v", task.ID))
+		text.WriteString("\n")
+	}
+	if text.Len() == 0 {
+		text.WriteString("Нет задач")
+	}
+	r.bot.Send(tgbotapi.NewMessage(curChatID, text.String()))
 }
