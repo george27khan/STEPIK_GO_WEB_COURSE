@@ -58,19 +58,14 @@ func (r *Router) Route(ctx context.Context) {
 			r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Неизвестная команда"))
 			continue
 		}
-
-		//task := domain.Task{
-		//	ChatID: update.Message.Chat.ID,
-		//}
-		//fmt.Println(update.UpdateID, update.Message.Text, , update.Message.Chat.UserName)
-
 	}
 }
 
 func (r *Router) handlerGetAllTask(ctx context.Context, update tgbotapi.Update) {
 	tasks, err := r.taskService.GetAll(ctx)
 	if err != nil {
-		fmt.Println(err)
+		r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("Ошибка при получении задач: %s", err.Error())))
+		return
 	}
 	text := strings.Builder{}
 	for _, task := range tasks {
@@ -100,7 +95,7 @@ func (r *Router) handlerCreateTask(ctx context.Context, update tgbotapi.Update) 
 	}
 	id, err := r.taskService.Create(ctx, task)
 	if err != nil {
-		fmt.Println(err)
+		r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("Ошибка при создании задачи: %s", err.Error())))
 	}
 	message := fmt.Sprintf("Задача \"%s\" создана, id=%v", task.Text, id)
 	r.bot.Send(tgbotapi.NewMessage(task.AuthorChatID, message))
@@ -125,7 +120,7 @@ func (r *Router) handlerAssignTask(ctx context.Context, update tgbotapi.Update) 
 	}
 	task, err := r.taskService.AssignTask(ctx, message.Chat.UserName, message.Chat.ID, taskID)
 	if err != nil {
-		fmt.Println(err)
+		r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("Ошибка при назначении задачи: %s", err.Error())))
 	}
 
 	messageExecutor := fmt.Sprintf("Задача \"%s\" назначена на вас", task.Text)
@@ -164,7 +159,7 @@ func (r *Router) handlerUnassignTask(ctx context.Context, update tgbotapi.Update
 	}
 
 	if err = r.taskService.UnassignTask(ctx, taskID); err != nil {
-		fmt.Println(err)
+		r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("Ошибка при снятии задачи: %s", err.Error())))
 	}
 	if curChatID == task.AuthorChatID {
 		r.bot.Send(tgbotapi.NewMessage(curChatID, "Принято"))
@@ -200,7 +195,7 @@ func (r *Router) handlerResolveTask(ctx context.Context, update tgbotapi.Update)
 	}
 
 	if err = r.taskService.ResolveTask(ctx, taskID); err != nil {
-		fmt.Println(err)
+		r.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("Ошибка при решении задачи: %s", err.Error())))
 	}
 	if curChatID == task.AuthorChatID {
 		r.bot.Send(tgbotapi.NewMessage(curChatID, fmt.Sprintf("Задача \"%s\" выполнена", task.Text)))
@@ -224,7 +219,6 @@ func (r *Router) handlerGetUserTask(ctx context.Context, update tgbotapi.Update)
 		text.WriteString(fmt.Sprintf("%v. %s by @%s", task.ID, task.Text, task.Author))
 		text.WriteString(fmt.Sprintf("\n/unassign_%v /resolve_%v", task.ID, task.ID))
 		text.WriteString("\n")
-
 	}
 	if text.Len() == 0 {
 		text.WriteString("Нет задач")
@@ -241,7 +235,6 @@ func (r *Router) handlerGetOwnerTask(ctx context.Context, update tgbotapi.Update
 		r.bot.Send(tgbotapi.NewMessage(curChatID, "Ошибка при поиске задач на исполнителе"))
 		return
 	}
-	fmt.Println("tasks", tasks)
 
 	text := strings.Builder{}
 	for _, task := range tasks {
