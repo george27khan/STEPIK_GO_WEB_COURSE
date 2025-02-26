@@ -2,23 +2,26 @@
 #
 # https://gqlgen.com/getting-started/
 
+#go run github.com/99designs/gqlgen generate
+
+
 
 type Item {
-  id: ID!
+  id: Int!
   name: String!
   inStock: Int!
-  sellerId: ID!
-  catalogId: ID!
+  sellerId: Int!
+  catalogId: Int!
 }
 
 type Seller {
-  id: ID!
+  id: Int!
   name: String!
   deals: String!
 }
 
 type Catalog {
-	id:       ID!
+	id:       Int!
 	name:     String!
 	childs: [Child!]!
 }

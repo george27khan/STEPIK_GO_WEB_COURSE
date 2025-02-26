@@ -8,18 +8,18 @@ type Child struct {
 }
 
 type Item struct {
-	ID        string `json:"id"`
+	ID        int    `json:"id"`
 	Name      string `json:"name"`
 	InStock   int    `json:"inStock"`
-	SellerID  string `json:"sellerId"`
-	CatalogID string `json:"catalogId"`
+	SellerID  int    `json:"sellerId"`
+	CatalogID int    `json:"catalogId"`
 }
 
 type Query struct {
 }
 
 type Seller struct {
-	ID    string `json:"id"`
+	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Deals string `json:"deals"`
 }

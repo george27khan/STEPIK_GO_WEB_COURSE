@@ -30,8 +30,10 @@ func (r *catalogResolver) Childs(ctx context.Context, obj *model.Catalog) ([]*mo
 func (r *queryResolver) Catalog(ctx context.Context, id string) (*model.Catalog, error) {
 	fmt.Println(r.Resolver.Data.Catalog)
 	idInt, _ := strconv.Atoi(id)
-	if catalog, ok := r.Resolver.Data.Catalog[idInt]; ok {
-		return &catalog, nil
+	for _, catalog := range r.Resolver.Data.Catalog {
+		if catalog.ID == idInt {
+			return &catalog, nil
+		}
 	}
 	return nil, fmt.Errorf("Каталог с ID=%s не найден", id)
 }
