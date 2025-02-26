@@ -1,0 +1,24 @@
+# GraphQL schema example
+#
+# https://gqlgen.com/getting-started/
+
+
+type Item {
+  id: ID!
+  name: String!
+  instock: Int!
+  sellerId: ID!
+  catalogId: ID!
+}
+
+type Seller {
+  id: ID!
+  name: String!
+  deals: String!
+}
+
+type Catalog {
+	id:       ID!
+	name:     String!
+	parendId: ID!
+}

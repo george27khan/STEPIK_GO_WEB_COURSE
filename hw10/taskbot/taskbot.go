@@ -36,6 +36,7 @@ func startTaskBot(ctx context.Context, httpListenAddr string) error {
 	db := storage.NewTaskStorage()
 	taskService := service.NewTaskService(db)
 	bot, err := tgbotapi.NewBotAPI(botToken)
+	fmt.Println(bot, err, botToken)
 	if err != nil {
 		return err
 	}
