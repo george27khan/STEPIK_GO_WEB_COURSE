@@ -2,16 +2,15 @@
 
 package model
 
-type Catalog struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	ParendID string `json:"parendId"`
+type Child struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 type Item struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Instock   int    `json:"instock"`
+	InStock   int    `json:"inStock"`
 	SellerID  string `json:"sellerId"`
 	CatalogID string `json:"catalogId"`
 }

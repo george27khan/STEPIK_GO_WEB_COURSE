@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"shopql/graph/model"
+	"strconv"
 )
 
 // This file will not be regenerated automatically.
@@ -15,20 +17,15 @@ type Resolver struct {
 }
 
 type Data struct {
-	Catalog CatalogJS `json:"catalog"`
-	Seller  []Seller  `json:"sellers"`
-}
-type Seller struct {
-	Id    int    `json:"id"`
-	Name  string `json:"name"`
-	Deals int    `json:"deals"`
+	Catalog CatalogJS  `json:"catalog"`
+	Seller  []SellerJS `json:"sellers"`
 }
 
 type ItemJS struct {
 	Id       int    `json:"id"`
 	Name     string `json:"name"`
 	InStock  int    `json:"in_stock"`
-	SellerId int    `json:"seller_id"`
+	SellerId string `json:"seller_id"`
 }
 type CatalogJS struct {
 	Id     int         `json:"id"`
@@ -36,23 +33,17 @@ type CatalogJS struct {
 	Childs []CatalogJS `json:"childs"`
 	Items  []ItemJS    `json:"items"`
 }
-type Item struct {
-	Id        int
-	Name      string
-	InStock   int
-	SellerID  int
-	CatalogID int
-}
-type Catalog struct {
-	Id       int
-	Name     string
-	ParendID int
+
+type SellerJS struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Deals string `json:"deals"`
 }
 
 type LocalDB struct {
-	Item    []Item
-	Catalog []Catalog
-	Seller  []Seller
+	Item    map[string]model.Item
+	Catalog map[int]model.Catalog
+	Seller  map[string]model.Seller
 }
 
 func NewResolver() *Resolver {
@@ -66,30 +57,37 @@ func NewResolver() *Resolver {
 	}
 	//fmt.Println(tmp.Catalog)
 
-	db := LocalDB{}
-	for _, val := range tmp.Seller {
-		db.Seller = append(db.Seller, val)
+	db := LocalDB{make(map[string]model.Item),
+		make(map[int]model.Catalog),
+		make(map[string]model.Seller)}
+	for _, seller := range tmp.Seller {
+		s := model.Seller{
+			ID:    strconv.Itoa(seller.ID),
+			Name:  seller.Name,
+			Deals: seller.Deals,
+		}
+		db.Seller[s.ID] = s
 	}
 	loadCatalog(&db, tmp.Catalog, 0)
 	return &Resolver{db}
 }
 
 func loadCatalog(db *LocalDB, catalog CatalogJS, parentID int) {
-	db.Catalog = append(db.Catalog, Catalog{
-		Id:       catalog.Id,
+	db.Catalog[catalog.Id] = model.Catalog{
+		ID:       catalog.Id,
 		Name:     catalog.Name,
 		ParendID: parentID,
-	})
+	}
 	for _, cat := range catalog.Childs {
 		loadCatalog(db, cat, catalog.Id)
 	}
 	for _, item := range catalog.Items {
-		db.Item = append(db.Item, Item{
-			Id:        item.Id,
+		db.Item[strconv.Itoa(item.Id)] = model.Item{
+			ID:        strconv.Itoa(item.Id),
 			Name:      item.Name,
 			InStock:   item.InStock,
 			SellerID:  item.SellerId,
-			CatalogID: catalog.Id,
-		})
+			CatalogID: strconv.Itoa(catalog.Id),
+		}
 	}
 }

@@ -1,4 +1,4 @@
-module hw11_shopql
+module shopql
 
 go 1.20
 
