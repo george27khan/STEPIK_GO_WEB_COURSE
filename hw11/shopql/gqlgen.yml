@@ -90,3 +90,5 @@ models:
     fields:
       childs:
         resolver: true
+      items:
+        resolver: true

@@ -50,6 +50,7 @@ type ComplexityRoot struct {
 	Catalog struct {
 		Childs func(childComplexity int) int
 		ID     func(childComplexity int) int
+		Items  func(childComplexity int) int
 		Name   func(childComplexity int) int
 	}
 
@@ -79,6 +80,7 @@ type ComplexityRoot struct {
 
 type CatalogResolver interface {
 	Childs(ctx context.Context, obj *model.Catalog) ([]*model.Child, error)
+	Items(ctx context.Context, obj *model.Catalog) ([]*model.Item, error)
 }
 type QueryResolver interface {
 	Catalog(ctx context.Context, id string) (*model.Catalog, error)
@@ -116,6 +118,13 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Catalog.ID(childComplexity), true
+
+	case "Catalog.items":
+		if e.complexity.Catalog.Items == nil {
+			break
+		}
+
+		return e.complexity.Catalog.Items(childComplexity), true
 
 	case "Catalog.name":
 		if e.complexity.Catalog.Name == nil {
@@ -520,6 +529,62 @@ func (ec *executionContext) fieldContext_Catalog_childs(ctx context.Context, fie
 	return fc, nil
 }
 
+func (ec *executionContext) _Catalog_items(ctx context.Context, field graphql.CollectedField, obj *model.Catalog) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Catalog_items(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Catalog().Items(rctx, obj)
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]*model.Item)
+	fc.Result = res
+	return ec.marshalNItem2ᚕᚖshopqlᚋgraphᚋmodelᚐItemᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Catalog_items(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Catalog",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Item_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Item_name(ctx, field)
+			case "inStock":
+				return ec.fieldContext_Item_inStock(ctx, field)
+			case "sellerId":
+				return ec.fieldContext_Item_sellerId(ctx, field)
+			case "catalogId":
+				return ec.fieldContext_Item_catalogId(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Item", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Child_id(ctx context.Context, field graphql.CollectedField, obj *model.Child) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Child_id(ctx, field)
 	if err != nil {
@@ -873,6 +938,8 @@ func (ec *executionContext) fieldContext_Query_Catalog(ctx context.Context, fiel
 				return ec.fieldContext_Catalog_name(ctx, field)
 			case "childs":
 				return ec.fieldContext_Catalog_childs(ctx, field)
+			case "items":
+				return ec.fieldContext_Catalog_items(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Catalog", field.Name)
 		},
@@ -2990,6 +3057,42 @@ func (ec *executionContext) _Catalog(ctx context.Context, sel ast.SelectionSet, 
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "items":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Catalog_items(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3674,6 +3777,60 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) marshalNItem2ᚕᚖshopqlᚋgraphᚋmodelᚐItemᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Item) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNItem2ᚖshopqlᚋgraphᚋmodelᚐItem(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNItem2ᚖshopqlᚋgraphᚋmodelᚐItem(ctx context.Context, sel ast.SelectionSet, v *model.Item) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Item(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v interface{}) (string, error) {

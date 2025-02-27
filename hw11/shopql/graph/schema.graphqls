@@ -24,6 +24,7 @@ type Catalog {
 	id:       Int!
 	name:     String!
 	childs: [Child!]!
+	items: [Item!]!
 }
 
 type Child {

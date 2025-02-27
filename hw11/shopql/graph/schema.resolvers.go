@@ -26,6 +26,23 @@ func (r *catalogResolver) Childs(ctx context.Context, obj *model.Catalog) ([]*mo
 	return res, nil
 }
 
+// Items is the resolver for the items field.
+func (r *catalogResolver) Items(ctx context.Context, obj *model.Catalog) ([]*model.Item, error) {
+	var cnt int
+	res := make([]*model.Item, 0)
+	for _, itm := range r.Resolver.Data.Item {
+		if itm.CatalogID == obj.ID {
+			item := itm
+			res = append(res, &item)
+			cnt++
+		}
+		if cnt == 3 { // по умолчанию максимум 3 жлемента
+			break
+		}
+	}
+	return res, nil
+}
+
 // Catalog is the resolver for the Catalog field.
 func (r *queryResolver) Catalog(ctx context.Context, id string) (*model.Catalog, error) {
 	fmt.Println(r.Resolver.Data.Catalog)
