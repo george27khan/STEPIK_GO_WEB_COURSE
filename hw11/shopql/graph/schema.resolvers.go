@@ -12,31 +12,32 @@ import (
 )
 
 // Childs is the resolver for the childs field.
-func (r *catalogResolver) Childs(ctx context.Context, obj *model.Catalog) ([]*model.Child, error) {
-	res := make([]*model.Child, 0)
+func (r *catalogResolver) Childs(ctx context.Context, obj *model.Catalog) ([]*model.Catalog, error) {
+	res := make([]*model.Catalog, 0)
 	for _, c := range r.Resolver.Data.Catalog {
 		if c.ParendID == obj.ID {
-			child := &model.Child{
-				ID:   c.ID,
-				Name: c.Name,
-			}
-			res = append(res, child)
+			child := c
+			res = append(res, &child)
 		}
 	}
 	return res, nil
 }
 
 // Items is the resolver for the items field.
-func (r *catalogResolver) Items(ctx context.Context, obj *model.Catalog) ([]*model.Item, error) {
+func (r *catalogResolver) Items(ctx context.Context, obj *model.Catalog, limit int, offset int) ([]*model.Item, error) {
 	var cnt int
 	res := make([]*model.Item, 0)
 	for _, itm := range r.Resolver.Data.Item {
 		if itm.CatalogID == obj.ID {
-			item := itm
-			res = append(res, &item)
-			cnt++
+			if offset != 0 {
+				offset--
+			} else {
+				item := itm
+				res = append(res, &item)
+				cnt++
+			}
 		}
-		if cnt == 3 { // по умолчанию максимум 3 жлемента
+		if cnt == limit { // по умолчанию максимум 3 жлемента
 			break
 		}
 	}

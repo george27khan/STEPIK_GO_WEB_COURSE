@@ -4,8 +4,6 @@
 
 #go run github.com/99designs/gqlgen generate
 
-
-
 type Item {
   id: Int!
   name: String!
@@ -23,16 +21,13 @@ type Seller {
 type Catalog {
 	id:       Int!
 	name:     String!
-	childs: [Child!]!
-	items: [Item!]!
-}
-
-type Child {
-	id:       Int!
-	name:     String!
+	childs: [Catalog!]!
+	items(limit: Int!=3, offset: Int!=0): [Item!]!
 }
 
 type Query {
   # query{ Catalog(ID: "1") { id name childs { id name } } }
+  # query{ Catalog(ID: "2") { id name childs { id name items { id name } } }}
   Catalog(ID: ID!): Catalog!
+
 }
