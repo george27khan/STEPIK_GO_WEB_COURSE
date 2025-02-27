@@ -37,33 +37,104 @@ func (r *catalogResolver) Items(ctx context.Context, obj *model.Catalog, limit i
 				cnt++
 			}
 		}
-		if cnt == limit { // по умолчанию максимум 3 жлемента
+		if cnt == limit { // по умолчанию максимум 3 элемента
 			break
 		}
 	}
 	return res, nil
 }
 
+// InStockText is the resolver for the inStockText field.
+func (r *itemResolver) InStockText(ctx context.Context, obj *model.Item) (string, error) {
+	switch {
+	case obj.InStock < 2:
+		return "мало", nil
+	case obj.InStock < 4:
+		return "хватает", nil
+	default:
+		return "много", nil
+	}
+}
+
+// Seller is the resolver for the seller field.
+func (r *itemResolver) Seller(ctx context.Context, obj *model.Item) (*model.Seller, error) {
+	for _, val := range r.Data.Seller {
+		if val.ID == obj.SellerID {
+			return &val, nil
+		}
+	}
+	return nil, fmt.Errorf("seller с ID=%v не найден", obj.SellerID)
+}
+
+// Parent is the resolver for the parent field.
+func (r *itemResolver) Parent(ctx context.Context, obj *model.Item) (*model.Catalog, error) {
+	for _, val := range r.Resolver.Data.Catalog {
+		if obj.CatalogID == val.ID {
+			return &val, nil
+		}
+	}
+	return nil, fmt.Errorf("Каталог для item с ID=%v не найден", obj.ID)
+}
+
 // Catalog is the resolver for the Catalog field.
 func (r *queryResolver) Catalog(ctx context.Context, id string) (*model.Catalog, error) {
-	fmt.Println(r.Resolver.Data.Catalog)
 	idInt, _ := strconv.Atoi(id)
 	for _, catalog := range r.Resolver.Data.Catalog {
 		if catalog.ID == idInt {
 			return &catalog, nil
 		}
 	}
-	return nil, fmt.Errorf("Каталог с ID=%s не найден", id)
+	return nil, fmt.Errorf("каталог с ID=%s не найден", id)
+}
+
+// Seller is the resolver for the Seller field.
+func (r *queryResolver) Seller(ctx context.Context, id string) (*model.Seller, error) {
+	idInt, _ := strconv.Atoi(id)
+	for _, seller := range r.Resolver.Data.Seller {
+		if seller.ID == idInt {
+			return &seller, nil
+		}
+	}
+	return nil, fmt.Errorf("продавец с ID=%s не найден", id)
+}
+
+// Items is the resolver for the items field.
+func (r *sellerResolver) Items(ctx context.Context, obj *model.Seller, limit int, offset int) ([]*model.Item, error) {
+	var cnt int
+	res := make([]*model.Item, 0)
+	for _, itm := range r.Resolver.Data.Item {
+		if itm.SellerID == obj.ID {
+			if offset != 0 {
+				offset--
+			} else {
+				item := itm
+				res = append(res, &item)
+				cnt++
+			}
+		}
+		if cnt == limit { // по умолчанию максимум 3 элемента
+			break
+		}
+	}
+	return res, nil
 }
 
 // Catalog returns CatalogResolver implementation.
 func (r *Resolver) Catalog() CatalogResolver { return &catalogResolver{r} }
 
+// Item returns ItemResolver implementation.
+func (r *Resolver) Item() ItemResolver { return &itemResolver{r} }
+
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Seller returns SellerResolver implementation.
+func (r *Resolver) Seller() SellerResolver { return &sellerResolver{r} }
+
 type catalogResolver struct{ *Resolver }
+type itemResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type sellerResolver struct{ *Resolver }
 
 // !!! WARNING !!!
 // The code below was going to be deleted when updating resolvers. It has been copied here so you have
@@ -71,4 +142,8 @@ type queryResolver struct{ *Resolver }
 //   - When renaming or deleting a resolver the old code will be put in here. You can safely delete
 //     it when you're done.
 //   - You have helper methods in this file. Move them out to keep these resolver files clean.
+func (r *sellerResolver) Deals(ctx context.Context, obj *model.Item) (string, error) {
+	panic(fmt.Errorf("not implemented: Deals - deals"))
+}
+
 type mutationResolver struct{ *Resolver }

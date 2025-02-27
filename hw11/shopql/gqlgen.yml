@@ -92,3 +92,19 @@ models:
         resolver: true
       items:
         resolver: true
+  Item:
+    model: shopql/graph/model.Item
+    fields:
+      seller:
+        resolver: true
+      inStockText:
+        resolver: true
+      parent:
+        resolver: true
+
+  Seller:
+    model: shopql/graph/model.Seller
+    fields:
+      items:
+        resolver: true
+

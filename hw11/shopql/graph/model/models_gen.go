@@ -2,19 +2,5 @@
 
 package model
 
-type Item struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	InStock   int    `json:"inStock"`
-	SellerID  int    `json:"sellerId"`
-	CatalogID int    `json:"catalogId"`
-}
-
 type Query struct {
-}
-
-type Seller struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Deals string `json:"deals"`
 }

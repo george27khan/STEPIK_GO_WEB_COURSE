@@ -7,15 +7,16 @@
 type Item {
   id: Int!
   name: String!
-  inStock: Int!
-  sellerId: Int!
-  catalogId: Int!
+  inStockText: String!
+  seller: Seller!
+  parent: Catalog!
 }
 
 type Seller {
   id: Int!
   name: String!
   deals: String!
+  items(limit: Int!=3, offset: Int!=0): [Item!]!
 }
 
 type Catalog {
@@ -29,5 +30,6 @@ type Query {
   # query{ Catalog(ID: "1") { id name childs { id name } } }
   # query{ Catalog(ID: "2") { id name childs { id name items { id name } } }}
   Catalog(ID: ID!): Catalog!
+  Seller(ID: ID!): Seller!
 
 }
