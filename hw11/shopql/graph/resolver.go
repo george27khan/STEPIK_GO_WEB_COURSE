@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"shopql/graph/model"
+	"sync"
 )
 
 // This file will not be regenerated automatically.
@@ -39,10 +40,33 @@ type SellerJS struct {
 	Deals string `json:"deals"`
 }
 
+type ItemInCard struct {
+	ItemID   int
+	Quantity int
+}
+
+type Cart struct {
+	Email string
+	items []*model.OrderRes
+}
+
 type LocalDB struct {
 	Item    []model.Item
 	Catalog []model.Catalog
 	Seller  []model.Seller
+	Cart    map[string]Cart
+	Users   map[string]User
+	Session map[string]User
+	CardMu  *sync.Mutex
+}
+
+type User struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
+type Reg struct {
+	User User `json:"user"`
 }
 
 func NewResolver() *Resolver {
@@ -58,7 +82,11 @@ func NewResolver() *Resolver {
 
 	db := LocalDB{make([]model.Item, 0),
 		make([]model.Catalog, 0),
-		make([]model.Seller, 0)}
+		make([]model.Seller, 0),
+		make(map[string]Cart, 0),
+		make(map[string]User),
+		make(map[string]User),
+		&sync.Mutex{}}
 	for _, seller := range tmp.Seller {
 		db.Seller = append(db.Seller, model.Seller{
 			ID:    seller.ID,

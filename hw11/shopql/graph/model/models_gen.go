@@ -2,5 +2,18 @@
 
 package model
 
+type Mutation struct {
+}
+
+type Order struct {
+	ItemID   int `json:"itemID"`
+	Quantity int `json:"quantity"`
+}
+
+type OrderRes struct {
+	Item     *Item `json:"item"`
+	Quantity int   `json:"quantity"`
+}
+
 type Query struct {
 }

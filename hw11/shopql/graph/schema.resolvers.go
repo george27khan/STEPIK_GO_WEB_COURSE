@@ -76,6 +76,94 @@ func (r *itemResolver) Parent(ctx context.Context, obj *model.Item) (*model.Cata
 	return nil, fmt.Errorf("Каталог для item с ID=%v не найден", obj.ID)
 }
 
+// AddToCart is the resolver for the AddToCart field.
+func (r *mutationResolver) AddToCart(ctx context.Context, in model.Order) ([]*model.OrderRes, error) {
+	user := ctx.Value("user").(User)
+	if user.Username == "" {
+		return nil, fmt.Errorf("Ошибка авторизации")
+	}
+	r.Data.CardMu.Lock()
+	defer r.Data.CardMu.Unlock()
+
+	if err := r.RemoveItemFromStock(in); err != nil {
+		return nil, err
+	}
+	//поиск товара
+	item, err := r.GetItemByID(in.ItemID)
+	if err != nil {
+		return nil, fmt.Errorf("Ошибка добавления товара в корзину: %s", err.Error())
+	}
+
+	//обработка корзины если элемент уже есть
+	if cart, ok := r.Data.Cart[user.Email]; ok {
+		for j, userItem := range cart.items {
+			if userItem.Item.ID == in.ItemID {
+				userItem.Quantity = userItem.Quantity + in.Quantity
+				userItem.Item = item
+				cart.items[j] = userItem
+				r.Data.Cart[user.Email] = cart
+				fmt.Println("r.Data.Cart[user.Email]1", *r.Data.Cart[user.Email].items[0].Item)
+
+				return cart.items, nil
+			}
+		}
+		//если тут, значит не нашли товар в корзине пользователя, добавим его
+		cart.items = append(cart.items, &model.OrderRes{item, in.Quantity})
+		r.Data.Cart[user.Email] = cart
+		fmt.Println("r.Data.Cart[user.Email]2", *r.Data.Cart[user.Email].items[0].Item)
+
+		return cart.items, nil
+	}
+	//Если тут, значит у пользователя нет корзины, создадим ее
+	cart := Cart{
+		Email: user.Email,
+		items: []*model.OrderRes{
+			&model.OrderRes{
+				item,
+				in.Quantity,
+			}}}
+	r.Data.Cart[user.Email] = cart
+	fmt.Println("r.Data.Cart[user.Email]", *r.Data.Cart[user.Email].items[0].Item)
+	return cart.items, nil
+}
+
+// RemoveFromCart is the resolver for the RemoveFromCart field.
+func (r *mutationResolver) RemoveFromCart(ctx context.Context, in model.Order) ([]*model.OrderRes, error) {
+	user := ctx.Value("user").(User)
+	if user.Username == "" {
+		return nil, fmt.Errorf("Ошибка авторизации")
+	}
+	r.Data.CardMu.Lock()
+	defer r.Data.CardMu.Unlock()
+
+	if err := r.AddItemInStock(in); err != nil {
+		return nil, err
+	}
+	//поиск товара
+	item, err := r.GetItemByID(in.ItemID)
+	if err != nil {
+		return nil, fmt.Errorf("Ошибка добавления товара в корзину: %s", err.Error())
+	}
+	//обработка корзины если элемент уже есть
+	if cart, ok := r.Data.Cart[user.Email]; ok {
+		for j, userItem := range cart.items {
+			if userItem.Item.ID == in.ItemID {
+				userItem.Quantity = userItem.Quantity - in.Quantity
+				if userItem.Quantity == 0 {
+					cart.items = append(cart.items[:j], cart.items[j+1:]...)
+				} else {
+					userItem.Item = item
+					cart.items[j] = userItem
+				}
+				r.Data.Cart[user.Email] = cart
+				return cart.items, nil
+			}
+		}
+	}
+	//Если тут, значит у пользователя нет товара в корзине
+	return nil, nil
+}
+
 // Catalog is the resolver for the Catalog field.
 func (r *queryResolver) Catalog(ctx context.Context, id string) (*model.Catalog, error) {
 	idInt, _ := strconv.Atoi(id)
@@ -96,6 +184,20 @@ func (r *queryResolver) Seller(ctx context.Context, id string) (*model.Seller, e
 		}
 	}
 	return nil, fmt.Errorf("продавец с ID=%s не найден", id)
+}
+
+// MyCart is the resolver for the MyCart field.
+func (r *queryResolver) MyCart(ctx context.Context) ([]*model.OrderRes, error) {
+	user := ctx.Value("user").(User)
+	if user.Username == "" {
+		return nil, fmt.Errorf("Ошибка авторизации")
+	}
+	r.Data.CardMu.Lock()
+	defer r.Data.CardMu.Unlock()
+	if cart, ok := r.Data.Cart[user.Email]; ok {
+		return cart.items, nil
+	}
+	return nil, fmt.Errorf("Корзина для клиента отсутствует")
 }
 
 // Items is the resolver for the items field.
@@ -125,6 +227,9 @@ func (r *Resolver) Catalog() CatalogResolver { return &catalogResolver{r} }
 // Item returns ItemResolver implementation.
 func (r *Resolver) Item() ItemResolver { return &itemResolver{r} }
 
+// Mutation returns MutationResolver implementation.
+func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
+
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
@@ -133,6 +238,7 @@ func (r *Resolver) Seller() SellerResolver { return &sellerResolver{r} }
 
 type catalogResolver struct{ *Resolver }
 type itemResolver struct{ *Resolver }
+type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type sellerResolver struct{ *Resolver }
 
@@ -142,8 +248,37 @@ type sellerResolver struct{ *Resolver }
 //   - When renaming or deleting a resolver the old code will be put in here. You can safely delete
 //     it when you're done.
 //   - You have helper methods in this file. Move them out to keep these resolver files clean.
+
+func (r *mutationResolver) AddItemInStock(in model.Order) error {
+	for i, item := range r.Data.Item {
+		if item.ID == in.ItemID {
+			r.Data.Item[i].InStock = item.InStock + in.Quantity
+			return nil
+		}
+	}
+	return fmt.Errorf("Товар не найден")
+}
+func (r *mutationResolver) RemoveItemFromStock(in model.Order) error {
+	for i, item := range r.Data.Item {
+		if item.ID == in.ItemID {
+			if in.Quantity <= item.InStock {
+				r.Data.Item[i].InStock = item.InStock - in.Quantity
+				return nil
+			} else {
+				return fmt.Errorf("not enough quantity")
+			}
+		}
+	}
+	return fmt.Errorf("Товар не найден")
+}
+func (r *mutationResolver) GetItemByID(id int) (*model.Item, error) {
+	for _, item := range r.Data.Item {
+		if item.ID == id {
+			return &item, nil
+		}
+	}
+	return nil, fmt.Errorf("Товар не найден")
+}
 func (r *sellerResolver) Deals(ctx context.Context, obj *model.Item) (string, error) {
 	panic(fmt.Errorf("not implemented: Deals - deals"))
 }
-
-type mutationResolver struct{ *Resolver }

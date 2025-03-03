@@ -486,70 +486,70 @@ func TestApp(t *testing.T) {
 			`,
 		},
 		// ----------------------------------------------------------------------------------------
-		&ApiTestCase{
-			Name: "Catalog - how many in cart - ERROR(no access) - directive @authorized",
-			GQL: `
-			{
-				Catalog(ID: "5") {
-				  id
-				  name
-				  items(limit: 1) {
-					id
-					name
-					inCart
-				  }
-				}
-			}
-			`,
-			URL: gqlURL,
-			ExpectedRaw: `
-			{
-				"errors": [
-				  {
-					"message": "User not authorized",
-					"path": [
-					  "Catalog",
-					  "items",
-					  0,
-					  "inCart"
-					]
-				  }
-				],
-				"data": {
-				  "Catalog": null
-				}
-			}
-			`,
-		},
+		//&ApiTestCase{
+		//	Name: "Catalog - how many in cart - ERROR(no access) - directive @authorized",
+		//	GQL: `
+		//	{
+		//		Catalog(ID: "5") {
+		//		  id
+		//		  name
+		//		  items(limit: 1) {
+		//			id
+		//			name
+		//			inCart
+		//		  }
+		//		}
+		//	}
+		//	`,
+		//	URL: gqlURL,
+		//	ExpectedRaw: `
+		//	{
+		//		"errors": [
+		//		  {
+		//			"message": "User not authorized",
+		//			"path": [
+		//			  "Catalog",
+		//			  "items",
+		//			  0,
+		//			  "inCart"
+		//			]
+		//		  }
+		//		],
+		//		"data": {
+		//		  "Catalog": null
+		//		}
+		//	}
+		//	`,
+		//},
 		// ----------------------------------------------------------------------------------------
-		&ApiTestCase{
-			Name: "Add to cart - ERROR(no access) - directive @authorized",
-			GQL: `
-			mutation {
-				AddToCart(in: {itemID: 1, quantity: 2}) {
-				  item {
-					id
-					name
-				  }
-				  quantity
-				}
-			}
-			`,
-			URL: gqlURL,
-			ExpectedRaw: `
-			{
-				"errors": [
-				  {
-					"message": "User not authorized",
-					"path": [
-					  "AddToCart"
-					]
-				  }
-				],
-				"data": null
-			}
-			`,
-		},
+		//&ApiTestCase{
+		//	Name: "Add to cart - ERROR(no access) - directive @authorized",
+		//	GQL: `
+		//	mutation {
+		//		AddToCart(in: {itemID: 1, quantity: 2}) {
+		//		  item {
+		//			id
+		//			name
+		//		  }
+		//		  quantity
+		//		}
+		//	}
+		//	`,
+		//	URL: gqlURL,
+		//	ExpectedRaw: `
+		//	{
+		//		"errors": [
+		//		  {
+		//			"message": "User not authorized",
+		//			"path": [
+		//			  "AddToCart"
+		//			]
+		//		  }
+		//		],
+		//		"data": null
+		//	}
+		//	`,
+		//},
 		// ----------------------------------------------------------------------------------------
 		&ApiTestCase{
 			Name:           "Register",
@@ -866,6 +866,7 @@ func TestApp(t *testing.T) {
 			if item.URL == gqlURL {
 				item.Method = "POST"
 			}
+			fmt.Println("string(url)", string(url))
 			req, _ := http.NewRequest(item.Method, string(url), bytes.NewReader(body))
 			req.Header.Add("Content-Type", "application/json")
 

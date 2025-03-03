@@ -31,5 +31,20 @@ type Query {
   # query{ Catalog(ID: "2") { id name childs { id name items { id name } } }}
   Catalog(ID: ID!): Catalog!
   Seller(ID: ID!): Seller!
+  MyCart:[OrderRes!]!
+}
 
+input Order {
+  itemID: Int!
+  quantity: Int!
+}
+
+type OrderRes {
+  item: Item!
+  quantity: Int!
+}
+type Mutation {
+  # mutation _{ratePhoto(photoID:"1", direction:"up"){id,url,rating,user{id,name}}}
+  AddToCart(in: Order!): [OrderRes!]!
+  RemoveFromCart(in: Order!): [OrderRes!]!
 }
