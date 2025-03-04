@@ -76,6 +76,19 @@ func (r *itemResolver) Parent(ctx context.Context, obj *model.Item) (*model.Cata
 	return nil, fmt.Errorf("Каталог для item с ID=%v не найден", obj.ID)
 }
 
+// InCart is the resolver for the inCart field.
+func (r *itemResolver) InCart(ctx context.Context, obj *model.Item) (int, error) {
+	cnt := 0
+	for _, cart := range r.Data.Cart {
+		for _, cartItem := range cart.items {
+			if cartItem.Item.ID == obj.ID {
+				cnt += cartItem.Quantity
+			}
+		}
+	}
+	return cnt, nil
+}
+
 // AddToCart is the resolver for the AddToCart field.
 func (r *mutationResolver) AddToCart(ctx context.Context, in model.Order) ([]*model.OrderRes, error) {
 	user := ctx.Value("user").(User)
@@ -248,7 +261,6 @@ type sellerResolver struct{ *Resolver }
 //   - When renaming or deleting a resolver the old code will be put in here. You can safely delete
 //     it when you're done.
 //   - You have helper methods in this file. Move them out to keep these resolver files clean.
-
 func (r *mutationResolver) AddItemInStock(in model.Order) error {
 	for i, item := range r.Data.Item {
 		if item.ID == in.ItemID {

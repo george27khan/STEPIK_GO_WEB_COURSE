@@ -101,6 +101,8 @@ models:
         resolver: true
       parent:
         resolver: true
+      inCart:
+        resolver: true
 
   Seller:
     model: shopql/graph/model.Seller

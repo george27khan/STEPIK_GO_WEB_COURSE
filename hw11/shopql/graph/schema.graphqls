@@ -10,6 +10,7 @@ type Item {
   inStockText: String!
   seller: Seller!
   parent: Catalog!
+  inCart: Int!
 }
 
 type Seller {
