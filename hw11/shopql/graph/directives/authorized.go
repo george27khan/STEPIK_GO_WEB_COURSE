@@ -10,7 +10,7 @@ import (
 func Authorized(ctx context.Context, obj interface{}, next graphql.Resolver) (res interface{}, err error) {
 	user := ctx.Value("user") // Достаем пользователя из контекста
 	if user == nil {
-		return nil, errors.New("User not authorized")
+		return obj, errors.New("User not authorized")
 	}
 	return next(ctx) // Если авторизован, выполняем запрос дальше
 }

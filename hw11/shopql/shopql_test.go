@@ -486,41 +486,41 @@ func TestApp(t *testing.T) {
 			`,
 		},
 		// ----------------------------------------------------------------------------------------
-		//&ApiTestCase{
-		//	Name: "Catalog - how many in cart - ERROR(no access) - directive @authorized",
-		//	GQL: `
-		//	{
-		//		Catalog(ID: "5") {
-		//		  id
-		//		  name
-		//		  items(limit: 1) {
-		//			id
-		//			name
-		//			inCart
-		//		  }
-		//		}
-		//	}
-		//	`,
-		//	URL: gqlURL,
-		//	ExpectedRaw: `
-		//	{
-		//		"errors": [
-		//		  {
-		//			"message": "User not authorized",
-		//			"path": [
-		//			  "Catalog",
-		//			  "items",
-		//			  0,
-		//			  "inCart"
-		//			]
-		//		  }
-		//		],
-		//		"data": {
-		//		  "Catalog": null
-		//		}
-		//	}
-		//	`,
-		//},
+		&ApiTestCase{
+			Name: "Catalog - how many in cart - ERROR(no access) - directive @authorized",
+			GQL: `
+			{
+				Catalog(ID: "5") {
+				  id
+				  name
+				  items(limit: 1) {
+					id
+					name
+					inCart
+				  }
+				}
+			}
+			`,
+			URL: gqlURL,
+			ExpectedRaw: `
+			{
+				"errors": [
+				  {
+					"message": "User not authorized",
+					"path": [
+					  "Catalog",
+					  "items",
+					  0,
+					  "inCart"
+					]
+				  }
+				],
+				"data": {
+				  "Catalog": null
+				}
+			}
+			`,
+		},
 		//----------------------------------------------------------------------------------------
 		&ApiTestCase{
 			Name: "Add to cart - ERROR(no access) - directive @authorized",
