@@ -37,7 +37,7 @@ func (r *catalogResolver) Items(ctx context.Context, obj *model.Catalog, limit i
 				cnt++
 			}
 		}
-		if cnt == limit { // по умолчанию максимум 3 элемента
+		if cnt == limit {
 			break
 		}
 	}
@@ -78,23 +78,22 @@ func (r *itemResolver) Parent(ctx context.Context, obj *model.Item) (*model.Cata
 
 // InCart is the resolver for the inCart field.
 func (r *itemResolver) InCart(ctx context.Context, obj *model.Item) (int, error) {
+	user := ctx.Value("user").(User)
 	cnt := 0
-	for _, cart := range r.Data.Cart {
+	if cart, ok := r.Data.Cart[user.Email]; ok {
 		for _, cartItem := range cart.items {
 			if cartItem.Item.ID == obj.ID {
 				cnt += cartItem.Quantity
 			}
 		}
+		return cnt, nil
 	}
-	return cnt, nil
+	return 0, fmt.Errorf("Cart not found")
 }
 
 // AddToCart is the resolver for the AddToCart field.
 func (r *mutationResolver) AddToCart(ctx context.Context, in model.Order) ([]*model.OrderRes, error) {
 	user := ctx.Value("user").(User)
-	if user.Username == "" {
-		return nil, fmt.Errorf("Ошибка авторизации")
-	}
 	r.Data.CardMu.Lock()
 	defer r.Data.CardMu.Unlock()
 
@@ -131,7 +130,7 @@ func (r *mutationResolver) AddToCart(ctx context.Context, in model.Order) ([]*mo
 	cart := Cart{
 		Email: user.Email,
 		items: []*model.OrderRes{
-			&model.OrderRes{
+			{
 				item,
 				in.Quantity,
 			}}}
@@ -143,9 +142,6 @@ func (r *mutationResolver) AddToCart(ctx context.Context, in model.Order) ([]*mo
 // RemoveFromCart is the resolver for the RemoveFromCart field.
 func (r *mutationResolver) RemoveFromCart(ctx context.Context, in model.Order) ([]*model.OrderRes, error) {
 	user := ctx.Value("user").(User)
-	if user.Username == "" {
-		return nil, fmt.Errorf("Ошибка авторизации")
-	}
 	r.Data.CardMu.Lock()
 	defer r.Data.CardMu.Unlock()
 
@@ -185,7 +181,7 @@ func (r *queryResolver) Catalog(ctx context.Context, id string) (*model.Catalog,
 			return &catalog, nil
 		}
 	}
-	return nil, fmt.Errorf("каталог с ID=%s не найден", id)
+	return &model.Catalog{}, fmt.Errorf("каталог с ID=%s не найден", id)
 }
 
 // Seller is the resolver for the Seller field.
@@ -202,9 +198,6 @@ func (r *queryResolver) Seller(ctx context.Context, id string) (*model.Seller, e
 // MyCart is the resolver for the MyCart field.
 func (r *queryResolver) MyCart(ctx context.Context) ([]*model.OrderRes, error) {
 	user := ctx.Value("user").(User)
-	if user.Username == "" {
-		return nil, fmt.Errorf("Ошибка авторизации")
-	}
 	r.Data.CardMu.Lock()
 	defer r.Data.CardMu.Unlock()
 	if cart, ok := r.Data.Cart[user.Email]; ok {
@@ -227,7 +220,7 @@ func (r *sellerResolver) Items(ctx context.Context, obj *model.Seller, limit int
 				cnt++
 			}
 		}
-		if cnt == limit { // по умолчанию максимум 3 элемента
+		if cnt == limit {
 			break
 		}
 	}
@@ -290,7 +283,4 @@ func (r *mutationResolver) GetItemByID(id int) (*model.Item, error) {
 		}
 	}
 	return nil, fmt.Errorf("Товар не найден")
-}
-func (r *sellerResolver) Deals(ctx context.Context, obj *model.Item) (string, error) {
-	panic(fmt.Errorf("not implemented: Deals - deals"))
 }

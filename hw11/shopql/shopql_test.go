@@ -521,35 +521,35 @@ func TestApp(t *testing.T) {
 		//	}
 		//	`,
 		//},
-		// ----------------------------------------------------------------------------------------
-		//&ApiTestCase{
-		//	Name: "Add to cart - ERROR(no access) - directive @authorized",
-		//	GQL: `
-		//	mutation {
-		//		AddToCart(in: {itemID: 1, quantity: 2}) {
-		//		  item {
-		//			id
-		//			name
-		//		  }
-		//		  quantity
-		//		}
-		//	}
-		//	`,
-		//	URL: gqlURL,
-		//	ExpectedRaw: `
-		//	{
-		//		"errors": [
-		//		  {
-		//			"message": "User not authorized",
-		//			"path": [
-		//			  "AddToCart"
-		//			]
-		//		  }
-		//		],
-		//		"data": null
-		//	}
-		//	`,
-		//},
+		//----------------------------------------------------------------------------------------
+		&ApiTestCase{
+			Name: "Add to cart - ERROR(no access) - directive @authorized",
+			GQL: `
+			mutation {
+				AddToCart(in: {itemID: 1, quantity: 2}) {
+				  item {
+					id
+					name
+				  }
+				  quantity
+				}
+			}
+			`,
+			URL: gqlURL,
+			ExpectedRaw: `
+			{
+				"errors": [
+				  {
+					"message": "User not authorized",
+					"path": [
+					  "AddToCart"
+					]
+				  }
+				],
+				"data": null
+			}
+			`,
+		},
 		// ----------------------------------------------------------------------------------------
 		&ApiTestCase{
 			Name:           "Register",

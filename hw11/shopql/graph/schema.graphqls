@@ -4,13 +4,15 @@
 
 #go run github.com/99designs/gqlgen generate
 
+directive @authorized on FIELD_DEFINITION
+
 type Item {
   id: Int!
   name: String!
   inStockText: String!
   seller: Seller!
   parent: Catalog!
-  inCart: Int!
+  inCart: Int! @authorized
 }
 
 type Seller {
@@ -32,7 +34,7 @@ type Query {
   # query{ Catalog(ID: "2") { id name childs { id name items { id name } } }}
   Catalog(ID: ID!): Catalog!
   Seller(ID: ID!): Seller!
-  MyCart:[OrderRes!]!
+  MyCart:[OrderRes!]! @authorized
 }
 
 input Order {
@@ -46,6 +48,6 @@ type OrderRes {
 }
 type Mutation {
   # mutation _{ratePhoto(photoID:"1", direction:"up"){id,url,rating,user{id,name}}}
-  AddToCart(in: Order!): [OrderRes!]!
-  RemoveFromCart(in: Order!): [OrderRes!]!
+  AddToCart(in: Order!): [OrderRes!]! @authorized
+  RemoveFromCart(in: Order!): [OrderRes!]! @authorized
 }

@@ -110,3 +110,13 @@ models:
       items:
         resolver: true
 
+directives:
+  authorized: {}
+
+
+# Включаем полные ошибки
+#autobind: []
+#omit_slice_element_pointers: false
+#struct_tag: json
+#use_directives: true
+#log_level: debug
