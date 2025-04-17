@@ -29,6 +29,12 @@ func main() {
 	players["Tristan"].HandleInput("идти коридор")
 	players["Tristan"].HandleInput("идти комната")
 	players["Tristan"].HandleInput("осмотреться")
+	players["Tristan"].HandleInput("одеть рюкзак")
+	players["Tristan"].HandleInput("взять ключи")
+	players["Tristan"].HandleInput("взять ключи")
+	players["Tristan"].HandleInput("взять конспекты")
+	players["Tristan"].HandleInput("идти коридор")
+	players["Tristan"].HandleInput("применить ключи дверь")
 
 	time.Sleep(2 * time.Second)
 }
