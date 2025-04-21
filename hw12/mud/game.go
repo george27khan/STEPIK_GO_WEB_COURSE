@@ -37,6 +37,8 @@ type Door struct {
 	OpenLocation *Location
 	IsOpen       bool
 }
+type TargetItems struct {
+}
 
 type LocationObject struct {
 	Name       string
@@ -84,6 +86,7 @@ func initGame() {
 	Outside = Location{
 		Name:          "улица",
 		LookAroundStr: "",
+		GoStr:         "на улице весна",
 		NextLocations: []*Location{&Corridor},
 	}
 	Corridor = Location{
@@ -126,14 +129,15 @@ func (l *Location) getItem(itemName string) (*Item, error) {
 	return nil, fmt.Errorf("нет такого")
 }
 
+// открывает дверь ключем, если он подходит
 func (l *Location) OpenDoor(key *Item) string {
 	for _, door := range l.Doors {
-		if !door.IsOpen && door.Key == key {
+		if door.Key == key {
 			door.IsOpen = true
 			return "дверь открыта"
 		}
 	}
-	return "дверь открыта"
+	return "дверь не открыта"
 }
 
 func (l *Location) Describe(command string) string {
@@ -189,8 +193,15 @@ func (l *Location) Describe(command string) string {
 	return res.String()
 }
 
+// проверка закрыта ли локация дверью
 func (l *Location) IsOpen(location string) bool {
 	for _, door := range l.Doors {
-		
+		if door.OpenLocation.Name == location {
+			if door.IsOpen {
+				return true
+			}
+			return false
+		}
 	}
+	return true
 }

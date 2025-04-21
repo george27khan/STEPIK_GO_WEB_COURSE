@@ -21,6 +21,7 @@ func (p *Player) LookAround(command string, params []string) {
 
 func addPlayer(player *Player) {
 	player.Location = world.StartLocation
+	fmt.Println("world.StartLocation", world.StartLocation.Name)
 	world.Players[player.Name] = player
 }
 
@@ -50,12 +51,17 @@ func (p *Player) Go(command string, params []string) {
 		fmt.Println("Ошибка Go")
 		return
 	}
-	if location, ok = world.Locations[params[0]]; !ok {
-		fmt.Println("Ошибочная локация ", params[0])
+	locationName := params[0]
+	if !p.Location.IsOpen(locationName) {
+		p.Actions <- "дверь закрыта"
+		return
+	}
+	if location, ok = world.Locations[locationName]; !ok {
+		fmt.Println("Ошибочная локация ", locationName)
 		return
 	}
 	if location, ok = world.Locations[params[0]]; !ok {
-		fmt.Println("Ошибочная локация ", params[0])
+		fmt.Println("Ошибочная локация ", locationName)
 		return
 	}
 	p.Location = location
@@ -102,20 +108,27 @@ func (p *Player) getItem(itemName string) (*Item, error) {
 			return item, nil
 		}
 	}
-	return nil, fmt.Errorf("итем отсутствует")
+	return nil, fmt.Errorf("нет предмета в инвентаре - %s", itemName)
 }
 
 func (p *Player) Use(command string, params []string) {
 	item, err := p.getItem(params[0])
+	target := params[1]
 	if err != nil {
 		p.Actions <- err.Error()
 		return
 	}
-	if item.Name == "ключ" {
+	if item.Name == "ключи" && target == "дверь" {
 		p.Actions <- p.Location.OpenDoor(item)
+		return
+	}
+	if item.Name == "ключи" && target != "дверь" {
+		p.Actions <- "не к чему применить"
+		return
 	}
 	if item.Action != clothe {
 		p.Actions <- fmt.Sprintf("%s недопустимое действие", params[1])
+		return
 	}
 	if item.Name == "рюкзак" {
 		p.Backpack = make([]*Item, 0)
