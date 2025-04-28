@@ -21,7 +21,6 @@ func (p *Player) LookAround(command string, params []string) {
 
 func addPlayer(player *Player) {
 	player.Location = world.StartLocation
-	fmt.Println("world.StartLocation", world.StartLocation.Name)
 	world.Players[player.Name] = player
 }
 
@@ -37,6 +36,7 @@ func (p *Player) HandleInput(command string) {
 	params := strings.Split(command, " ")
 	if fnc, ok = world.Commands[params[0]]; !ok {
 		p.Actions <- "неизвестная команда"
+		return
 	}
 	fnc(p, params[0], params[1:])
 }
@@ -52,6 +52,12 @@ func (p *Player) Go(command string, params []string) {
 		return
 	}
 	locationName := params[0]
+	//fmt.Println("p.Location.Name ", p.Location.Name, locationName)
+	if !p.Location.IsNextLocation(locationName) {
+		p.Actions <- fmt.Sprintf("нет пути в %s", locationName)
+		return
+	}
+
 	if !p.Location.IsOpen(locationName) {
 		p.Actions <- "дверь закрыта"
 		return
@@ -98,6 +104,7 @@ func (p *Player) ClotheItem(command string, params []string) {
 	}
 	if item.Name == "рюкзак" {
 		p.Backpack = make([]*Item, 0)
+		world.Locations["кухня"].DelAction("собрать рюкзак")
 	}
 	p.Actions <- fmt.Sprintf("вы одели: %s", item.Name)
 }

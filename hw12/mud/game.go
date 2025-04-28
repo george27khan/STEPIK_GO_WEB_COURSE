@@ -80,6 +80,7 @@ func initGame() {
 	Kitchen = Location{
 		Name:          "кухня",
 		LookAroundStr: "ты находишься на кухне, на столе чай",
+		GoStr:         "кухня, ничего интересного",
 		Actions:       []string{"собрать рюкзак", "идти в универ"},
 		NextLocations: []*Location{&Corridor},
 	}
@@ -140,6 +141,15 @@ func (l *Location) OpenDoor(key *Item) string {
 	return "дверь не открыта"
 }
 
+// удалить список нужных действий
+func (l *Location) DelAction(actionName string) {
+	for i, action := range l.Actions {
+		if action == actionName {
+			l.Actions = append(l.Actions[:i], l.Actions[i+1:]...)
+		}
+	}
+}
+
 func (l *Location) Describe(command string) string {
 	res := &strings.Builder{}
 	if command == lookAround {
@@ -148,34 +158,37 @@ func (l *Location) Describe(command string) string {
 		res.WriteString(l.GoStr)
 	}
 
-	cntActions := len(l.Actions)
-	if cntActions > 0 {
-		res.WriteString(", надо ")
-		if cntActions > 1 {
-			res.WriteString(strings.Join(l.Actions, " и "))
-		} else {
-			res.WriteString(l.Actions[0])
-		}
-	}
-
 	if command == "осмотреться" {
-		cntPlace := len(l.PlaceItems)
-		for j, place := range l.PlaceItems {
-			res.WriteString(place.Name)
-			cntItems := len(place.Items)
-			if cntItems == 1 {
-				res.WriteString(" - ")
+		cntActions := len(l.Actions)
+		if cntActions > 0 {
+			res.WriteString(", надо ")
+			if cntActions > 1 {
+				res.WriteString(strings.Join(l.Actions, " и "))
 			} else {
-				res.WriteString(": ")
+				res.WriteString(l.Actions[0])
 			}
-			for i, item := range place.Items {
-				res.WriteString(item.Name)
-				if i < cntItems-1 {
+		}
+		cntPlace := len(l.PlaceItems)
+		if l.PlaceItems != nil && len(l.PlaceItems) == 0 {
+			res.WriteString(fmt.Sprintf("пустая %s", l.Name))
+		} else {
+			for j, place := range l.PlaceItems {
+				res.WriteString(place.Name)
+				cntItems := len(place.Items)
+				if cntItems == 1 && len(l.PlaceItems) > 1 {
+					res.WriteString(" - ")
+				} else {
+					res.WriteString(": ")
+				}
+				for i, item := range place.Items {
+					res.WriteString(item.Name)
+					if i < cntItems-1 {
+						res.WriteString(", ")
+					}
+				}
+				if j < cntPlace-1 {
 					res.WriteString(", ")
 				}
-			}
-			if j < cntPlace-1 {
-				res.WriteString(", ")
 			}
 		}
 	}
@@ -184,7 +197,12 @@ func (l *Location) Describe(command string) string {
 	if cntLocation > 0 {
 		res.WriteString(". можно пройти - ")
 		for i, loc := range l.NextLocations {
-			res.WriteString(loc.Name)
+			if l.Name == "улица" {
+				res.WriteString("домой")
+			} else {
+				res.WriteString(loc.Name)
+			}
+
 			if i+1 < cntLocation {
 				res.WriteString(", ")
 			}
@@ -204,4 +222,14 @@ func (l *Location) IsOpen(location string) bool {
 		}
 	}
 	return true
+}
+
+// проверка доступности ли локация дверью
+func (l *Location) IsNextLocation(locationName string) bool {
+	for _, location := range l.NextLocations {
+		if location.Name == locationName {
+			return true
+		}
+	}
+	return false
 }
