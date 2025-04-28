@@ -13,6 +13,8 @@ const (
 	clothe     = "одеть"
 	take       = "взять"
 	use        = "применить"
+	tell       = "сказать"
+	tellPlayer = "сказать_игроку"
 )
 
 type World struct {
@@ -30,6 +32,7 @@ type Location struct {
 	PlaceItems    []*Place
 	NextLocations []*Location
 	Doors         []*Door
+	Players       []*Player
 }
 
 type Door struct {
@@ -56,6 +59,8 @@ type iCmdFunc interface {
 	TakeItem(command string, params []string)
 	ClotheItem(command string, params []string)
 	Use(command string, params []string)
+	TellPlayer(command string, params []string)
+	Tell(command string, params []string)
 }
 
 type cmdFunc func(fnc iCmdFunc, command string, params []string)
@@ -76,6 +81,7 @@ func initGame() {
 			&Place{"на столе", []*Item{corridorOutsideDoorKey, &Item{"конспекты", take}}},
 			&Place{"на стуле", []*Item{&Item{"рюкзак", clothe}}},
 		},
+		Players: make([]*Player, 0),
 	}
 	Kitchen = Location{
 		Name:          "кухня",
@@ -83,12 +89,14 @@ func initGame() {
 		GoStr:         "кухня, ничего интересного",
 		Actions:       []string{"собрать рюкзак", "идти в универ"},
 		NextLocations: []*Location{&Corridor},
+		Players:       make([]*Player, 0),
 	}
 	Outside = Location{
 		Name:          "улица",
 		LookAroundStr: "",
 		GoStr:         "на улице весна",
 		NextLocations: []*Location{&Corridor},
+		Players:       make([]*Player, 0),
 	}
 	Corridor = Location{
 		Name:          "коридор",
@@ -96,15 +104,16 @@ func initGame() {
 		GoStr:         "ничего интересного",
 		NextLocations: []*Location{&Kitchen, &Room, &Outside},
 		Doors:         []*Door{&Door{corridorOutsideDoorKey, &Outside, false}},
+		Players:       make([]*Player, 0),
 	}
 	Commands := map[string]cmdFunc{
-		lookAround:       iCmdFunc.LookAround,
-		goTo:             iCmdFunc.Go,
-		use:              iCmdFunc.Use,
-		take:             iCmdFunc.TakeItem,
-		clothe:           iCmdFunc.ClotheItem,
-		"сказать":        iCmdFunc.LookAround,
-		"сказать_игроку": iCmdFunc.LookAround}
+		lookAround: iCmdFunc.LookAround,
+		goTo:       iCmdFunc.Go,
+		use:        iCmdFunc.Use,
+		take:       iCmdFunc.TakeItem,
+		clothe:     iCmdFunc.ClotheItem,
+		tell:       iCmdFunc.Tell,
+		tellPlayer: iCmdFunc.TellPlayer}
 	world = World{
 		StartLocation: &Kitchen,
 		Locations:     map[string]*Location{"коридор": &Corridor, "комната": &Room, "кухня": &Kitchen, "улица": &Outside},
@@ -150,7 +159,7 @@ func (l *Location) DelAction(actionName string) {
 	}
 }
 
-func (l *Location) Describe(command string) string {
+func (l *Location) Describe(command string, player *Player) string {
 	res := &strings.Builder{}
 	if command == lookAround {
 		res.WriteString(l.LookAroundStr)
@@ -208,6 +217,15 @@ func (l *Location) Describe(command string) string {
 			}
 		}
 	}
+
+	if command == "осмотреться" && len(l.Players) > 1 {
+		for _, p := range l.Players {
+			if p.Name == player.Name {
+				continue
+			}
+			res.WriteString(". Кроме вас тут ещё " + p.Name)
+		}
+	}
 	return res.String()
 }
 
@@ -232,4 +250,14 @@ func (l *Location) IsNextLocation(locationName string) bool {
 		}
 	}
 	return false
+}
+
+// проверка доступности ли локация дверью
+func (l *Location) DelPlayer(player *Player) {
+	for i, p := range l.Players {
+		if p == player {
+			l.Players = append(l.Players[:i], l.Players[i+1:]...)
+			return
+		}
+	}
 }

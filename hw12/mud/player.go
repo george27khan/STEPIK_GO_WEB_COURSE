@@ -16,11 +16,12 @@ func NewPlayer(name string) *Player {
 	return &Player{name, make(chan string), nil, nil}
 }
 func (p *Player) LookAround(command string, params []string) {
-	p.Actions <- p.Location.Describe(command)
+	p.Actions <- p.Location.Describe(command, p)
 }
 
 func addPlayer(player *Player) {
 	player.Location = world.StartLocation
+	world.StartLocation.Players = append(world.StartLocation.Players, player)
 	world.Players[player.Name] = player
 }
 
@@ -70,8 +71,10 @@ func (p *Player) Go(command string, params []string) {
 		fmt.Println("Ошибочная локация ", locationName)
 		return
 	}
+	p.Location.DelPlayer(p)
 	p.Location = location
-	p.Actions <- p.Location.Describe(command)
+
+	p.Actions <- p.Location.Describe(command, p)
 }
 
 func (p *Player) TakeItem(command string, params []string) {
@@ -141,4 +144,32 @@ func (p *Player) Use(command string, params []string) {
 		p.Backpack = make([]*Item, 0)
 	}
 	p.Actions <- fmt.Sprintf("вы одели: %s", item.Name)
+}
+
+func (p *Player) TellPlayer(command string, params []string) {
+	playerName := params[0]
+	message := ""
+	if len(params[1:]) == 0 {
+		message = fmt.Sprintf("%s выразительно молчит, смотря на вас", p.Name)
+	} else {
+		text := strings.Join(params[1:], " ")
+		message = fmt.Sprintf("%s говорит вам: %s", p.Name, text)
+	}
+
+	for _, targetPlayer := range p.Location.Players {
+		if targetPlayer.Name == playerName {
+			targetPlayer.Actions <- message
+			return
+		}
+	}
+	p.Actions <- "тут нет такого игрока"
+
+}
+
+func (p *Player) Tell(command string, params []string) {
+	text := strings.Join(params, " ")
+	message := fmt.Sprintf("%s говорит: %s", p.Name, text)
+	for _, targetPlayer := range p.Location.Players {
+		targetPlayer.Actions <- message
+	}
 }
